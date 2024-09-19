@@ -4,7 +4,7 @@
 #@Time : 2022/10/6 15:11
 #@Author: sunrise
 #@File : IMSCSANetV7.py
-#@Todo : improved muti-scale context self-attention model
+#@Todo : improved muti-scale context self-attention models
 # DANet+改进的注意力机制+多尺度ASPP+多个pca
 import torch
 from torch import nn
@@ -316,17 +316,17 @@ class ASPP(nn.Module):
 
 # if __name__ == "__main__":
 #     print(1024 // 4)
-#     model = IMSCSANetV7(16)
+#     models = IMSCSANetV7(16)
 #     x = torch.randn(4, 3, 512, 512)
 #     y = torch.randn(1, 3, 128, 128)
 #     z = torch.randn(1, 1024, 32, 32)
 #     w = torch.randn(1, 1024, 32, 32)
 #     h = torch.randn(1, 1024, 32, 32)
-#     # model = ResNet50()
+#     # models = ResNet50()
 #     # out = torch.cat(w, z, h), dim=1)
-#     # out,_ = model.base_forward(x)
-#     # model = MSCSABlock(64)
-#     out = model(x)
+#     # out,_ = models.base_forward(x)
+#     # models = MSCSABlock(64)
+#     out = models(x)
 #     print(out.size())
 #
 #     i = 1

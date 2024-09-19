@@ -73,15 +73,15 @@ if __name__ == '__main__':
     # batchsize % 2==0
     # images = torch.rand(size=(2, 6, 256, 256)).to(device)
     # images = images.to(device, dtype=torch.float32)
-    # model.to(device)
-    # ret1 = model(images).to(device)
+    # models.to(device)
+    # ret1 = models(images).to(device)
     # print(ret1.size())
-    # print(model)
+    # print(models)
 
     # from thop import profile
 
     # input = torch.randn(16, 6, 256, 256)
-    # flops, params = profile(model, inputs=(input,))
+    # flops, params = profile(models, inputs=(input,))
     # print('the flops is {}G,the params is {}M'.format(round(flops / (10 ** 9), 2),
     #                                                   round(params / (10 ** 6), 2)))  # 4111514624.0 25557032.0 res50
 
@@ -110,4 +110,4 @@ if __name__ == '__main__':
                                                                                          mean_fps=mean_fps))
     print(mean_syn)
 
-    # stat(model, (3, 256, 256))
+    # stat(models, (3, 256, 256))

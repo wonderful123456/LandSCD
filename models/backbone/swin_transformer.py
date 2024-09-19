@@ -459,7 +459,7 @@ class SwinTransformer(nn.Module):
           https://arxiv.org/pdf/2103.14030
 
     Args:
-        pretrain_img_size (int): Input image size for training the pretrained model,
+        pretrain_img_size (int): Input image size for training the pretrained models,
             used in absolute postion embedding. Default 224.
         patch_size (int | tuple(int)): Patch size. Default: 4.
         in_chans (int): Number of input image channels. Default: 3.
@@ -641,7 +641,7 @@ class SwinTransformer(nn.Module):
         return tuple(outs)
 
     def train(self, mode=True):
-        """Convert the model into training mode while keep layers freezed."""
+        """Convert the models into training mode while keep layers freezed."""
         super(SwinTransformer, self).train(mode)
         self._freeze_stages()
 
@@ -649,7 +649,7 @@ class SwinTransformer(nn.Module):
         pretrain_dict = model_zoo.load_url('https://github.com/SwinTransformer/storage/releases/download/v1.0.0/swin_tiny_patch4_window7_224.pth')
         model_dict = {}
         state_dict = self.state_dict()
-        for k, v in pretrain_dict['model'].items():
+        for k, v in pretrain_dict['models'].items():
             if k in state_dict:
                 model_dict[k] = v
         state_dict.update(model_dict)
@@ -660,7 +660,7 @@ class SwinTransformer(nn.Module):
             'https://github.com/SwinTransformer/storage/releases/download/v1.0.0/swin_small_patch4_window7_224.pth')
         model_dict = {}
         state_dict = self.state_dict()
-        for k, v in pretrain_dict['model'].items():
+        for k, v in pretrain_dict['models'].items():
             if k in state_dict:
                 model_dict[k] = v
         state_dict.update(model_dict)
@@ -671,7 +671,7 @@ class SwinTransformer(nn.Module):
             'https://github.com/SwinTransformer/storage/releases/download/v1.0.0/swin_large_patch4_window7_224_22kto1k.pth')
         model_dict = {}
         state_dict = self.state_dict()
-        for k, v in pretrain_dict['model'].items():
+        for k, v in pretrain_dict['models'].items():
             if k in state_dict:
                 model_dict[k] = v
         state_dict.update(model_dict)
@@ -699,7 +699,7 @@ if __name__ == "__main__":
             out_indices=(0, 1, 2, 3),
             frozen_stages=-1,
             use_checkpoint=False)
-    # model = PatchEmbed()
+    # models = PatchEmbed()
     out = model(data)
     print(out)
 
