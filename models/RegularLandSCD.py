@@ -85,7 +85,7 @@ if __name__ == '__main__':
     # print('the flops is {}G,the params is {}M'.format(round(flops / (10 ** 9), 2),
     #                                                   round(params / (10 ** 6), 2)))  # 4111514624.0 25557032.0 res50
 
-    dummy_input = torch.randn(4, 6, 256, 256, dtype=torch.float).to(device)
+    dummy_input = torch.randn(1, 6, 256, 256, dtype=torch.float).to(device)
     starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
     repetitions = 50
     timings = np.zeros((repetitions, 1))
