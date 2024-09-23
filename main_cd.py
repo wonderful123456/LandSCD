@@ -16,24 +16,42 @@ from utils.parser import get_parser_with_args_from_json
 from utils.saver import Saver
 from utils.logger import Logger as Log
 
+import torch.nn.functional as F
+
+def cross_entropy(input, target, weight=None, reduction='mean',ignore_index=255):
+    """
+    logSoftmax_with_loss
+    :param input: torch.Tensor, N*C*H*W
+    :param target: torch.Tensor, N*1*H*W,/ N*H*W
+    :param weight: torch.Tensor, C
+    :return: torch.Tensor [0]
+    """
+    target = target.long()
+    # if target.dim() == 4:
+    #     target = torch.squeeze(target, dim=1)
+    # if input.shape[-1] != target.shape[-1]:
+    #     input = F.interpolate(input, size=target.shape[1:], mode='bilinear',align_corners=True)
+
+    return F.cross_entropy(input=input, target=target, weight=weight,
+                           ignore_index=ignore_index, reduction=reduction)
 
 def split_sample(sample, seg_pretrain=False):
-    if not seg_pretrain:
-        img_A = sample['img_A'].cuda(non_blocking=True)
-        img_B = sample['img_B'].cuda(non_blocking=True)
-        label_BCD = sample['label_BCD'].cuda(non_blocking=True)
-        label_SGA = sample['label_SGA'].cuda(non_blocking=True)
-        label_SGB = sample['label_SGB'].cuda(non_blocking=True)
-        return img_A, img_B, label_BCD, label_SGA.long(), label_SGB.long()
-    else:
-        imgs = sample['img_A'].cuda(non_blocking=True)
-        labels = sample['label_SGA'].cuda(non_blocking=True)
-        batch_size = int(imgs.shape[0] / 2)
-        img_A = imgs[0:batch_size, :]
-        img_B = imgs[batch_size::, :]
-        label_SGA = labels[0:batch_size, :]
-        label_SGB = labels[batch_size::, :]
-        return img_A, img_B, None, label_SGA.long(), label_SGB.long()
+    # if not seg_pretrain:
+    img_A = sample['img_A'].cuda(non_blocking=True)
+    img_B = sample['img_B'].cuda(non_blocking=True)
+    label_BCD = sample['label_BCD'].cuda(non_blocking=True)
+    label_SGA = sample['label_SGA'].cuda(non_blocking=True)
+    label_SGB = sample['label_SGB'].cuda(non_blocking=True)
+    return img_A, img_B, label_BCD, label_SGA.long(), label_SGB.long()
+    # else:
+    #     imgs = sample['img_A'].cuda(non_blocking=True)
+    #     labels = sample['label_SGA'].cuda(non_blocking=True)
+    #     batch_size = int(imgs.shape[0] / 2)
+    #     img_A = imgs[0:batch_size, :]
+    #     img_B = imgs[batch_size::, :]
+    #     label_SGA = labels[0:batch_size, :]
+    #     label_SGB = labels[batch_size::, :]
+    #     return img_A, img_B, None, label_SGA.long(), label_SGB.long()
 
 
 def get_dataset(args):
@@ -61,7 +79,7 @@ def main(args):
                             persistent_workers=True, pin_memory=True, num_workers=args.val_num_workers,
                             drop_last=drop_last)
 
-    loss_bcd = BCDLoss()
+    loss_bcd = cross_entropy
     loss_seg = torch.nn.CrossEntropyLoss(ignore_index=args.num_segclass)
     loss_abs = AdditionalBackgroundSupervision(ignore_index=args.num_segclass)
     optimizer = torch.optim.Adam(itertools.chain(model.parameters()), lr=args.learning_rate,
@@ -116,7 +134,7 @@ def main(args):
 
             # whether only segmentation
             if not args.only_seg:
-                loss_cd = loss_bcd(outputs['BCD'], label_BCD)
+                loss_cd = loss_bcd(outputs['BCD'], label_BCD.squeeze(dim=1))
 
             # whether seg pretraining
             elif args.only_seg and args.seg_pretrain:
@@ -133,13 +151,13 @@ def main(args):
             if not args.only_bcd and (not args.seg_pretrain):
                 loss_seg_A = loss_seg(outputs['seg_A'], label_SGA.squeeze(dim=1))
                 loss_seg_B = loss_seg(outputs['seg_B'], label_SGB.squeeze(dim=1))
-            elif not args.only_bcd and args.seg_pretrain:
-                loss_seg_A = loss_seg(torch.cat([outputs['seg_A'], outputs['seg_B']], dim=0),
-                                      torch.cat([label_SGA, label_SGB], dim=0))
-                loss_seg_B = torch.tensor(0)
-            elif args.only_bcd:
-                loss_seg_A = torch.tensor(0)
-                loss_seg_B = torch.tensor(0)
+            # elif not args.only_bcd and args.seg_pretrain:
+            #     loss_seg_A = loss_seg(torch.cat([outputs['seg_A'], outputs['seg_B']], dim=0),
+            #                           torch.cat([label_SGA, label_SGB], dim=0))
+            #     loss_seg_B = torch.tensor(0)
+            # elif args.only_bcd:
+            #     loss_seg_A = torch.tensor(0)
+            #     loss_seg_B = torch.tensor(0)
 
                 # only global: must not warmup; only local: anyway
             flag = (not warmup) or args.local_contrast
@@ -206,20 +224,20 @@ def main(args):
                     outputs = model(imgs)
 
                 if not args.only_seg:
-                    loss_cd = loss_bcd(outputs['BCD'], label_BCD)
+                    loss_cd = loss_bcd(outputs['BCD'], label_BCD.squeeze(dim=1))
                 else:
                     loss_cd = torch.tensor(0)
 
                 if not args.only_bcd and (not args.seg_pretrain):
                     loss_seg_A = loss_seg(outputs['seg_A'], label_SGA.squeeze(dim=1))
                     loss_seg_B = loss_seg(outputs['seg_B'], label_SGB.squeeze(dim=1))
-                elif not args.only_bcd and args.seg_pretrain:
-                    loss_seg_A = loss_seg(torch.cat([outputs['seg_A'], outputs['seg_B']], dim=0),
-                                          torch.cat([label_SGA, label_SGB], dim=0))
-                    loss_seg_B = torch.tensor(0)
-                else:
-                    loss_seg_A = torch.tensor(0)
-                    loss_seg_B = torch.tensor(0)
+                # elif not args.only_bcd and args.seg_pretrain:
+                #     loss_seg_A = loss_seg(torch.cat([outputs['seg_A'], outputs['seg_B']], dim=0),
+                #                           torch.cat([label_SGA, label_SGB], dim=0))
+                #     loss_seg_B = torch.tensor(0)
+                # else:
+                #     loss_seg_A = torch.tensor(0)
+                #     loss_seg_B = torch.tensor(0)
                 loss = loss_cd + loss_seg_A + loss_seg_B
 
                 valosses_bcd.update(loss_cd.item())
@@ -228,20 +246,20 @@ def main(args):
                 valosses_total.update(loss.item())
 
                 if not args.only_seg:
-                    pred_bcd = outputs['BCD'].sigmoid().squeeze().cpu().detach().numpy().round().astype('int')
+                    pred_bcd = outputs['BCD'].argmax(dim=1).squeeze().cpu().detach().numpy().round().astype('int')
                     evaluator_bcd.add_batch(label_BCD.cpu().numpy().astype('int').squeeze(), pred_bcd)
 
                 if not args.only_bcd and args.separate_val_seg:
                     pred_seg_A = torch.argmax(outputs['seg_A'], 1).cpu().detach().numpy().astype('int')
-                    evaluator_seg_A.add_batch(label_SGA.cpu().numpy().astype('int'), pred_seg_A)
+                    evaluator_seg_A.add_batch(label_SGA.squeeze(dim=1).cpu().numpy().astype('int'), pred_seg_A)
                     pred_seg_B = torch.argmax(outputs['seg_B'], 1).cpu().detach().numpy().astype('int')
-                    evaluator_seg_B.add_batch(label_SGB.cpu().numpy().astype('int'), pred_seg_B)
-                elif not args.only_bcd and (not args.separate_val_seg):
-                    pred_seg_A = torch.argmax(outputs['seg_A'], 1).cpu().detach().numpy().astype('int')
-                    pred_seg_B = torch.argmax(outputs['seg_B'], 1).cpu().detach().numpy().astype('int')
-                    pred_seg = np.concatenate([pred_seg_A, pred_seg_B], axis=0)
-                    label_seg = torch.cat([label_SGA.squeeze(dim=1), label_SGB.squeeze(dim=1)], dim=0)
-                    evaluator_seg_total.add_batch(label_seg.cpu().numpy().astype('int'), pred_seg)
+                    evaluator_seg_B.add_batch(label_SGB.squeeze(dim=1).cpu().numpy().astype('int'), pred_seg_B)
+                # elif not args.only_bcd and (not args.separate_val_seg):
+                #     pred_seg_A = torch.argmax(outputs['seg_A'], 1).cpu().detach().numpy().astype('int')
+                #     pred_seg_B = torch.argmax(outputs['seg_B'], 1).cpu().detach().numpy().astype('int')
+                #     pred_seg = np.concatenate([pred_seg_A, pred_seg_B], axis=0)
+                #     label_seg = torch.cat([label_SGA.squeeze(dim=1), label_SGB.squeeze(dim=1)], dim=0)
+                #     evaluator_seg_total.add_batch(label_seg.cpu().numpy().astype('int'), pred_seg)
 
                 if batch_idx % args.print_step == 0 or batch_idx == len(val_loader) - 1:
                     print(

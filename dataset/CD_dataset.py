@@ -69,14 +69,22 @@ def get_label_path(root_dir, img_name):
 
 class ImageDataset(data.Dataset):
     """VOCdataloder"""
-    def __init__(self, root_dir="C:/Users/zyy/Documents/Tencent Files/919688409/FileRecv/regularCultivatedLandDatasets", split='train', img_size=256, is_train=True,to_tensor=True):
+    def __init__(self, root_dir="C:/Users/zyy/Documents/Tencent Files/919688409/FileRecv/regularCultivatedLandDatasetsV1", split='train', img_size=256, is_train=True,to_tensor=True):
         super(ImageDataset, self).__init__()
         self.root_dir = root_dir
         self.img_size = img_size
         self.split = split  # train | train_aug | val
         # self.list_path = self.root_dir + '/' + LIST_FOLDER_NAME + '/' + self.list + '.txt'
         self.list_path = os.path.join(self.root_dir, LIST_FOLDER_NAME, self.split+'.txt')
-        self.img_name_list = load_img_name_list(self.list_path)
+        self.img_name_list_tmp = load_img_name_list(self.list_path)
+        self.img_name_list = []
+
+        for line in self.img_name_list_tmp:
+            self.img_name_list.append(line)
+            self.img_name_list.append(line + "_aug_0")
+            self.img_name_list.append(line + "_aug_1")
+            self.img_name_list.append(line + "_aug_2")
+            self.img_name_list.append(line + "_aug_3")
 
         self.A_size = len(self.img_name_list)  # get the size of dataset A
         self.to_tensor = to_tensor
@@ -113,7 +121,7 @@ class ImageDataset(data.Dataset):
 
 class CDDataset(ImageDataset):
 
-    def __init__(self, root_dir="C:/Users/zyy/Documents/Tencent Files/919688409/FileRecv/regularCultivatedLandDatasets", img_size=256, split='train', is_train=True, label_transform=None,
+    def __init__(self, root_dir="C:/Users/zyy/Documents/Tencent Files/919688409/FileRecv/regularCultivatedLandDatasetsV1", img_size=256, split='train', is_train=True, label_transform=None,
                  to_tensor=True):
         super(CDDataset, self).__init__(root_dir, img_size=img_size, split=split, is_train=is_train,
                                         to_tensor=to_tensor)
