@@ -15,6 +15,7 @@ from utils.helper import get_lr, seed_torch, get_model
 from utils.parser import get_parser_with_args_from_json
 from utils.saver import Saver
 from utils.logger import Logger as Log
+from utils.lr_scheduler import LR_Scheduler
 
 import torch.nn.functional as F
 
@@ -84,7 +85,9 @@ def main(args):
     loss_abs = AdditionalBackgroundSupervision(ignore_index=args.num_segclass)
     optimizer = torch.optim.Adam(itertools.chain(model.parameters()), lr=args.learning_rate,
                                  weight_decay=args.weight_decay)
-    lr_scheduler = StepLR(optimizer, step_size=10, gamma=0.9)
+    # lr_scheduler = StepLR(optimizer, step_size=10, gamma=0.9)
+    lr_scheduler = LR_Scheduler('poly', args.learning_rate,
+                                  args.epochs, 4800)
 
     saver = Saver(args)
     evaluator_bcd = BCDEvaluator()
