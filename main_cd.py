@@ -164,11 +164,11 @@ def main(args):
 
                 # only global: must not warmup; only local: anyway
             flag = (not warmup) or args.local_contrast
-            if args.with_sacl and flag:
-                loss_contrast = outputs['contrast_loss']
-                losses_cont.update(loss_contrast.item())
-            else:
-                loss_contrast = torch.tensor(0)
+            # if args.with_sacl and flag:
+            #     loss_contrast = outputs['contrast_loss']
+            #     losses_cont.update(loss_contrast.item())
+            # else:
+            #     loss_contrast = torch.tensor(0)
 
             # bscc loss
             # if args.with_bscc:
@@ -176,7 +176,7 @@ def main(args):
             # else:
             #     loss_bscc = torch.tensor(0)
             # total loss
-            loss = loss_cd + loss_seg_A + loss_seg_B + loss_contrast# + loss_bscc
+            loss = loss_cd + loss_seg_A + loss_seg_B# + loss_contrast# + loss_bscc
 
             optimizer.zero_grad()
             loss.backward()
@@ -189,19 +189,28 @@ def main(args):
             losses_total.update(loss.item())
 
             if batch_idx % args.print_step == 0 or batch_idx == len(train_loader) - 1:
+                # print(
+                #     '[Epoch:%3d/%3d | Batch:%4d/%4d] loss_total: %.4f loss_bcd: %.4f loss_segA: %.4f loss_segB: %.4f loss_contrast: %.4f loss_bscc: %.4f lr: %5f' %
+                #     (epoch, args.epochs, batch_idx + 1, train_loader.__len__(), losses_total.avg,
+                #      losses_bcd.avg, losses_seg_A.avg, losses_seg_B.avg, losses_cont.avg, losses_bscc.avg,
+                #      get_lr(optimizer))
+                #     )
                 print(
-                    '[Epoch:%3d/%3d | Batch:%4d/%4d] loss_total: %.4f loss_bcd: %.4f loss_segA: %.4f loss_segB: %.4f loss_contrast: %.4f loss_bscc: %.4f lr: %5f' %
+                    '[Epoch:%3d/%3d | Batch:%4d/%4d] loss_total: %.4f loss_bcd: %.4f loss_segA: %.4f loss_segB: %.4f lr: %5f' %
                     (epoch, args.epochs, batch_idx + 1, train_loader.__len__(), losses_total.avg,
-                     losses_bcd.avg, losses_seg_A.avg, losses_seg_B.avg, losses_cont.avg, losses_bscc.avg,
+                     losses_bcd.avg, losses_seg_A.avg, losses_seg_B.avg,
                      get_lr(optimizer))
                     )
 
-        lr_scheduler.step()
-
+        # lr_scheduler.step()
+        lr_scheduler(optimizer, batch_idx, epoch, None)
+        # Log.info(
+        #     '[Training   Epoch:%3d/%3d] loss_total: %.4f loss_bcd: %.4f loss_segA: %.4f loss_segB: %.4f loss_contrast: %.4f loss_bscc: %.4f lr: %f' %
+        #     (epoch, args.epochs, losses_total.avg, losses_bcd.avg, losses_seg_A.avg, losses_seg_B.avg, losses_cont.avg,
+        #      losses_bscc.avg, get_lr(optimizer)))
         Log.info(
-            '[Training   Epoch:%3d/%3d] loss_total: %.4f loss_bcd: %.4f loss_segA: %.4f loss_segB: %.4f loss_contrast: %.4f loss_bscc: %.4f lr: %f' %
-            (epoch, args.epochs, losses_total.avg, losses_bcd.avg, losses_seg_A.avg, losses_seg_B.avg, losses_cont.avg,
-             losses_bscc.avg, get_lr(optimizer)))
+            '[Training   Epoch:%3d/%3d] loss_total: %.4f loss_bcd: %.4f loss_segA: %.4f loss_segB: %.4f lr: %f' %
+            (epoch, args.epochs, losses_total.avg, losses_bcd.avg, losses_seg_A.avg, losses_seg_B.avg, get_lr(optimizer)))
 
         # validation
         evaluator_bcd.reset()
@@ -257,6 +266,9 @@ def main(args):
                     evaluator_seg_A.add_batch(label_SGA.squeeze(dim=1).cpu().numpy().astype('int'), pred_seg_A)
                     pred_seg_B = torch.argmax(outputs['seg_B'], 1).cpu().detach().numpy().astype('int')
                     evaluator_seg_B.add_batch(label_SGB.squeeze(dim=1).cpu().numpy().astype('int'), pred_seg_B)
+
+                    # label_seg = torch.cat([label_SGA.squeeze(dim=1), label_SGB.squeeze(dim=1)], dim=0)
+                    # evaluator_seg_total.add_batch(label_seg.cpu().numpy().astype('int'), pred_seg)
                 # elif not args.only_bcd and (not args.separate_val_seg):
                 #     pred_seg_A = torch.argmax(outputs['seg_A'], 1).cpu().detach().numpy().astype('int')
                 #     pred_seg_B = torch.argmax(outputs['seg_B'], 1).cpu().detach().numpy().astype('int')
@@ -290,16 +302,20 @@ def main(args):
                 mIoU_seg_B = evaluator_seg_B.Mean_Intersection_over_Union()
                 F1_seg_B = evaluator_seg_B.F1_score().mean()
 
-                OA_seg_total = evaluator_seg_total.Overall_Accuracy()
-                mIoU_seg_total = evaluator_seg_total.Mean_Intersection_over_Union()
-                F1_seg_total = evaluator_seg_total.F1_score().mean()
-            else:
-                OA_seg_A = mIoU_seg_A = F1_seg_A = OA_seg_B = mIoU_seg_B = F1_seg_B = OA_seg_total = mIoU_seg_total = F1_seg_total = 0
+                # OA_seg_total = evaluator_seg_total.Overall_Accuracy()
+                # mIoU_seg_total = evaluator_seg_total.Mean_Intersection_over_Union()
+                # F1_seg_total = evaluator_seg_total.F1_score().mean()
+            # else:
+            #     OA_seg_A = mIoU_seg_A = F1_seg_A = OA_seg_B = mIoU_seg_B = F1_seg_B = OA_seg_total = mIoU_seg_total = F1_seg_total = 0
 
+            # Log.info(
+            #     '[Validation Epoch:%3d/%3d] OA_BCD: %.4f IoU_BCD: %.4f F1_BCD: %.4f OA_SEG_A: %.4f mIoU_SEG_A: %.4f F1_SEG_A: %.4f OA_SEG_B: %.4f mIoU_SEG_B: %.4f F1_SEG_B: %.4f OA_SEG_total: %.4f mIoU_SEG_total: %.4f F1_SEG_total: %.4f' %
+            #     (epoch, args.epochs, OA_bcd, IoU_bcd, F1_bcd, OA_seg_A, mIoU_seg_A, F1_seg_A,
+            #      OA_seg_B, mIoU_seg_B, F1_seg_B, OA_seg_total, mIoU_seg_total, F1_seg_total))
             Log.info(
-                '[Validation Epoch:%3d/%3d] OA_BCD: %.4f IoU_BCD: %.4f F1_BCD: %.4f OA_SEG_A: %.4f mIoU_SEG_A: %.4f F1_SEG_A: %.4f OA_SEG_B: %.4f mIoU_SEG_B: %.4f F1_SEG_B: %.4f OA_SEG_total: %.4f mIoU_SEG_total: %.4f F1_SEG_total: %.4f' %
+                '[Validation Epoch:%3d/%3d] OA_BCD: %.4f IoU_BCD: %.4f F1_BCD: %.4f OA_SEG_A: %.4f mIoU_SEG_A: %.4f F1_SEG_A: %.4f OA_SEG_B: %.4f mIoU_SEG_B: %.4f F1_SEG_B: %.4f' %
                 (epoch, args.epochs, OA_bcd, IoU_bcd, F1_bcd, OA_seg_A, mIoU_seg_A, F1_seg_A,
-                 OA_seg_B, mIoU_seg_B, F1_seg_B, OA_seg_total, mIoU_seg_total, F1_seg_total))
+                 OA_seg_B, mIoU_seg_B, F1_seg_B))
 
         if args.separate_val_seg:
             metric_current = IoU_bcd + mIoU_seg_A + mIoU_seg_B

@@ -3,7 +3,7 @@ import numpy as np
 import torch.nn as nn
 from torchvision import models
 from torch.nn import functional as F
-from utils.misc import initialize_weights
+# from utils.misc import initialize_weights
 
 from models.backbone.iswin_transformerv3 import *
 from models.sseg.uperhead import UperNetHead
@@ -39,9 +39,19 @@ class ISwinUperNetV5(nn.Module):
             use_checkpoint=False,
             use_attens=use_attens,
             layer_name="tiny")
-        self.decode_head = UperNetHead(
+        self.cd_decode_head = UperNetHead(
             in_channels=[96, 192, 384, 768],
-            channels=512,
+            channels=384,
+            num_classes=2,
+        )
+        self.a_seg_decode_head = UperNetHead(
+            in_channels=[256, 512, 1024, 2048],
+            channels=384,
+            num_classes=num_classes,
+        )
+        self.b_seg_decode_head = UperNetHead(
+            in_channels=[96, 192, 384, 768],
+            channels=384,
             num_classes=num_classes,
         )
         # self.auxiliary_head = FCNHead(
@@ -59,17 +69,27 @@ class ISwinUperNetV5(nn.Module):
     def forward(self, input):
         size = input.size()[2:]
         x, a_encoder, b_encoder = self.backbone(input)
-        main_ = self.decode_head(x)
+        main_ = self.cd_decode_head(x)
+
+        a_seg_out = self.a_seg_decode_head(a_encoder)
+        b_seg_out = self.b_seg_decode_head(b_encoder)
         # aux_ = self.auxiliary_head(x)
         # return main_,aux_ # 主分类器，辅助分类器
         main_ = F.interpolate(main_, size, mode='bilinear', align_corners=True)
-        return main_  # 主分类器，辅助分类器
+        a_seg_out = F.interpolate(a_seg_out, size, mode='bilinear', align_corners=True)
+        b_seg_out = F.interpolate(b_seg_out, size, mode='bilinear', align_corners=True)
+        return {'BCD': main_, 'seg_A': a_seg_out, 'seg_B': b_seg_out}  # 主分类器，辅助分类器
 
 if __name__ == '__main__':
     import torch
     # from torchstat import stat
     device = torch.device("cuda")
-    model = ISwinUperNetV5(pretrain_img_size=256).to(device)
+    img = torch.randn(2, 6, 256, 256)#.to(device)
+    model = ISwinUperNetV5(pretrain_img_size=256)#.to(device)
+    # print(model(img)[0].shape)
+    print(model(img)['BCD'].shape)
+    print(model(img)['seg_A'].shape)
+    print(model(img)['seg_B'].shape)
     # batchsize % 2==0
     # images = torch.rand(size=(2, 6, 256, 256)).to(device)
     # images = images.to(device, dtype=torch.float32)
@@ -85,29 +105,29 @@ if __name__ == '__main__':
     # print('the flops is {}G,the params is {}M'.format(round(flops / (10 ** 9), 2),
     #                                                   round(params / (10 ** 6), 2)))  # 4111514624.0 25557032.0 res50
 
-    dummy_input = torch.randn(1, 6, 256, 256, dtype=torch.float).to(device)
-    starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
-    repetitions = 50
-    timings = np.zeros((repetitions, 1))
-    # GPU-WARM-UP
-    for _ in range(10):
-        _ = model(dummy_input)
-    # MEASURE PERFORMANCE
-    with torch.no_grad():
-        for rep in range(repetitions):
-            starter.record()
-            _ = model(dummy_input)
-            ender.record()
-            # WAIT FOR GPU SYNC
-            torch.cuda.synchronize()
-            curr_time = starter.elapsed_time(ender)
-            timings[rep] = curr_time
-    mean_syn = np.sum(timings) / repetitions
-    std_syn = np.std(timings)
-    mean_fps = 1000. / mean_syn
-    print(' * Mean@1 {mean_syn:.3f}ms Std@5 {std_syn:.3f}ms FPS@1 {mean_fps:.2f}'.format(mean_syn=mean_syn,
-                                                                                         std_syn=std_syn,
-                                                                                         mean_fps=mean_fps))
-    print(mean_syn)
+    # dummy_input = torch.randn(1, 6, 256, 256, dtype=torch.float).to(device)
+    # starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
+    # repetitions = 50
+    # timings = np.zeros((repetitions, 1))
+    # # GPU-WARM-UP
+    # for _ in range(10):
+    #     _ = model(dummy_input)
+    # # MEASURE PERFORMANCE
+    # with torch.no_grad():
+    #     for rep in range(repetitions):
+    #         starter.record()
+    #         _ = model(dummy_input)
+    #         ender.record()
+    #         # WAIT FOR GPU SYNC
+    #         torch.cuda.synchronize()
+    #         curr_time = starter.elapsed_time(ender)
+    #         timings[rep] = curr_time
+    # mean_syn = np.sum(timings) / repetitions
+    # std_syn = np.std(timings)
+    # mean_fps = 1000. / mean_syn
+    # print(' * Mean@1 {mean_syn:.3f}ms Std@5 {std_syn:.3f}ms FPS@1 {mean_fps:.2f}'.format(mean_syn=mean_syn,
+    #                                                                                      std_syn=std_syn,
+    #                                                                                      mean_fps=mean_fps))
+    # print(mean_syn)
 
     # stat(models, (3, 256, 256))

@@ -9,6 +9,7 @@ import sys
 sys.path.append("..") 
 from models.BiSRNet import *
 from models.ClearSCD import *
+from models.RegularLandSCD import *
 # from torchstat import stat
 # from thop import profile
 import time
@@ -84,6 +85,8 @@ def get_model(args):
         return BiSRNet(num_classes=6)
     elif args.model == 'ClearSCD':
         return ClearSCD(args)
+    elif args.model == 'RegularLandSCD':
+        return ISwinUperNetV5(pretrain_img_size=args.size, num_classes=args.num_segclass, in_chans=args.num_channel, use_attens=1)
 
    
 if __name__ == '__main__':
