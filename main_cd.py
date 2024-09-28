@@ -63,12 +63,25 @@ def get_dataset(args):
         val_dataset = CDDataset(split='val')
     return train_dataset, val_dataset
 
+def save_checkpoint(saver, model, optimizer, epoch, metric_current, name=None):
+    """Save the current state of training."""
+    state = {
+        'epoch': epoch,
+        'state_dict': model.state_dict(),
+        'optimizer': optimizer.state_dict(),
+        'metric': metric_current
+    }
+    saver.save_checkpoint(state, epoch, metric_current, name)
+
 
 def main(args):
     seed_torch()
 
     model = get_model(args).cuda()
     train_dataset, val_dataset = get_dataset(args)
+    
+
+    
 
     drop_last = True
     # if args.dataset == 'Nanjing':
@@ -87,7 +100,9 @@ def main(args):
                                  weight_decay=args.weight_decay)
     # lr_scheduler = StepLR(optimizer, step_size=10, gamma=0.9)
     lr_scheduler = LR_Scheduler('poly', args.learning_rate,
-                                  args.epochs, 4800)
+                                  args.epochs, 600)
+
+
 
     saver = Saver(args)
     evaluator_bcd = BCDEvaluator()
@@ -99,13 +114,28 @@ def main(args):
     start_epoch = 1
     Log.init(logfile_level="info", log_file=saver.experiment_dir + '/log.log')
 
-    if isinstance(args.resume, str):
-        checkpoint = torch.load(args.resume)
-        checkpoint['epoch'] = 1
-        model.load_state_dict(checkpoint['state_dict'])
-        Log.info("=> loaded checkpoint '{}' (epoch {})".format(args.resume, checkpoint['epoch']))
-        del checkpoint
-    epoch_best = start_epoch
+    # if isinstance(args.resume, str):
+    #     checkpoint = torch.load(args.resume)
+    #     checkpoint['epoch'] = 1
+    #     model.load_state_dict(checkpoint['state_dict'])
+    #     Log.info("=> loaded checkpoint '{}' (epoch {})".format(args.resume, checkpoint['epoch']))
+    #     del checkpoint
+    # epoch_best = start_epoch
+
+    # 新增部分: 检查是否需要恢复训练
+    if args.resume is not None:
+        if os.path.isfile(args.resume):
+            print(f"=> loading checkpoint '{args.resume}'")
+            checkpoint = torch.load(args.resume)
+            model.load_state_dict(checkpoint['state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer'])
+            start_epoch = checkpoint['epoch'] + 1
+            print(f"=> loaded checkpoint '{args.resume}' (epoch {checkpoint['epoch']})")
+        else:
+            print(f"=> no checkpoint found at '{args.resume}'")
+            start_epoch = 1
+    else:
+        start_epoch = 1
 
     for epoch in tqdm(range(start_epoch, args.epochs + 1), desc=args.congfig_name):
         if epoch > args.warmup_epoch:
@@ -117,8 +147,8 @@ def main(args):
         losses_seg_A = AverageMeter()
         losses_seg_B = AverageMeter()
         losses_bcd = AverageMeter()
-        losses_bscc = AverageMeter()
-        losses_cont = AverageMeter()
+        # losses_bscc = AverageMeter()
+        # losses_cont = AverageMeter()
         losses_total = AverageMeter()
 
         model.train()
@@ -320,22 +350,33 @@ def main(args):
         if args.separate_val_seg:
             metric_current = IoU_bcd + mIoU_seg_A + mIoU_seg_B
         else:
-            metric_current = IoU_bcd + mIoU_seg_total
+            metric_current = IoU_bcd #+ mIoU_seg_total
 
         if (metric_current > metric_best) or (epoch == 1):
             metric_best_dict = {}
             metric_best_dict["IoU_BCD"] = IoU_bcd
             metric_best_dict["mIoU_SEG_A"] = mIoU_seg_A
             metric_best_dict["mIoU_SEG_B"] = mIoU_seg_B
-            metric_best_dict["mIoU_SEG_total"] = mIoU_seg_total
+            # metric_best_dict["mIoU_SEG_total"] = mIoU_seg_total
             epoch_best = epoch
             metric_best = metric_current
 
         if args.epochs > 0:
             if epoch > 0:
+                # save_checkpoint(saver, model, optimizer, epoch, metric_current)
+                # save_checkpoint(saver, model, optimizer, epoch, metric_best, "best")
                 saver.save_checkpoint({
                     'state_dict': model.state_dict(),
-                }, epoch, metric_current)
+                    'epoch': epoch,
+                    'optimizer': optimizer.state_dict(),
+                    'metric': metric_current
+                }, epoch, metric_current, None)
+                saver.save_checkpoint({
+                    'state_dict': model.state_dict(),
+                    'epoch': epoch,
+                    'optimizer': optimizer.state_dict(),
+                    'metric': metric_best
+                }, epoch, metric_best, "best_")
 
         print('=> Current metric %.4f Best metric %.4f' % (metric_current, metric_best))
         Log.info('=> Best epoch {} Best metric {}'.format(epoch_best, metric_best_dict))

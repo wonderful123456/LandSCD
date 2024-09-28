@@ -199,7 +199,7 @@ class CotSR(nn.Module):
         return out1, out2
 
 class BiSRNet(nn.Module):
-    def __init__(self, in_channels=3, num_classes=7):
+    def __init__(self, in_channels=3, num_classes=6):
         super(BiSRNet, self).__init__()        
         self.FCN = FCN(in_channels, pretrained=True)
         self.SiamSR = SR(128)
@@ -277,8 +277,43 @@ class BiSRNet(nn.Module):
     #
     #     return F.upsample(change, x_size[2:], mode='bilinear'), F.upsample(out1, x_size[2:], mode='bilinear'), F.upsample(out2, x_size[2:], mode='bilinear')
 
-# if __name__ == '__main__':
-#     img_A = torch.randn(1, 3, 512, 512)
-#     img_B = torch.randn(1, 3, 512, 512)
-#     model = BiSRNet()
-#     print(model(img_A, img_B)[0].shape)
+if __name__ == '__main__':
+    # img_A = torch.randn(1, 3, 512, 512)
+    # img_B = torch.randn(1, 3, 512, 512)
+    device = torch.device("cuda")
+    # img = torch.randn(4, 6, 256, 256)
+    model = BiSRNet().to(device)
+    # # print(model(img_A, img_B)[0].shape)
+    # print(model(img)['seg_A'].shape)
+
+    from thop import profile
+
+    input = torch.randn(16, 6, 256, 256).to(device)
+    flops, params = profile(model, inputs=(input,))
+    print('the flops is {}G,the params is {}M'.format(round(flops / (10 ** 9), 2),
+                                                      round(params / (10 ** 6), 2)))  # 4111514624.0 25557032.0 res50
+
+    dummy_input = torch.randn(16, 6, 256, 256, dtype=torch.float).to(device)
+    starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
+    repetitions = 50
+    timings = np.zeros((repetitions, 1))
+    # GPU-WARM-UP
+    for _ in range(10):
+        _ = model(dummy_input)
+    # MEASURE PERFORMANCE
+    with torch.no_grad():
+        for rep in range(repetitions):
+            starter.record()
+            _ = model(dummy_input)
+            ender.record()
+            # WAIT FOR GPU SYNC
+            torch.cuda.synchronize()
+            curr_time = starter.elapsed_time(ender)
+            timings[rep] = curr_time
+    mean_syn = np.sum(timings) / repetitions
+    std_syn = np.std(timings)
+    mean_fps = 1000. / mean_syn
+    print(' * Mean@1 {mean_syn:.3f}ms Std@5 {std_syn:.3f}ms FPS@1 {mean_fps:.2f}'.format(mean_syn=mean_syn,
+                                                                                         std_syn=std_syn,
+                                                                                         mean_fps=mean_fps))
+    print(mean_syn)

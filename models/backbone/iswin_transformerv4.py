@@ -231,7 +231,7 @@ class ContextFuseBlock(nn.Module):
         self.mlp_ratio = mlp_ratio
         self.norm1 = norm_layer(dim)
         self.norm2 = norm_layer(dim)
-        self.lk = nn.Linear(conv_dim, dim, bias=False)
+        # self.lk = nn.Linear(conv_dim, dim, bias=False)
         self.attn = ContextAttention(
             dim, num_heads=num_heads,
             qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
@@ -253,7 +253,7 @@ class ContextFuseBlock(nn.Module):
             x: Input feature, tensor size (B, H*W, C).
             H, W: Spatial resolution of the input feature.
         """
-        y = self.lk(y)
+        # y = self.lk(y)
         # atten_x, atten_y = self.attn(self.norm1(x), self.norm2(y))
         H_x, W_x = int(x.size(1) ** .5), int(x.size(1)** .5)
         H_y, W_y = int(y.size(1)** .5), int(y.size(1)** .5)
@@ -466,6 +466,20 @@ class BasicLayer(nn.Module):
                 drop_path=drop_path[i] if isinstance(drop_path, list) else drop_path,
                 norm_layer=norm_layer)
             for i in range(depth)])
+        self.blocks_conv = nn.ModuleList([
+            SwinTransformerBlock(
+                dim=dim,
+                num_heads=num_heads,
+                window_size=window_size,
+                shift_size=0 if (i % 2 == 0) else window_size // 2,
+                mlp_ratio=mlp_ratio,
+                qkv_bias=qkv_bias,
+                qk_scale=qk_scale,
+                drop=drop,
+                attn_drop=attn_drop,
+                drop_path=drop_path[i] if isinstance(drop_path, list) else drop_path,
+                norm_layer=norm_layer)
+            for i in range(depth)])
         self.conv_channel = conv_channel
         #cat merging
         self.catmerge = CatMerging(dim=dim, conv_dim=conv_channel)
@@ -497,10 +511,11 @@ class BasicLayer(nn.Module):
         # patch merging layer
         if downsample is not None:
             self.downsample = downsample(dim=dim, norm_layer=norm_layer)
+            self.downsample_conv = downsample(dim=dim, norm_layer=norm_layer)
         else:
             self.downsample = None
 
-    def forward(self, x, conv_out, H, W):
+    def forward(self, x, x_conv, H, W):
         """ Forward function.
 
         Args:
@@ -535,17 +550,26 @@ class BasicLayer(nn.Module):
                 x = checkpoint.checkpoint(blk, x, attn_mask)
             else:
                 x = blk(x, attn_mask)
+
+        for blk in self.blocks_conv:
+            blk.H, blk.W = H, W
+            if self.use_checkpoint:
+                x_conv = checkpoint.checkpoint(blk, x_conv, attn_mask)
+            else:
+                x_conv = blk(x_conv, attn_mask)
+
         if self.use_attens == 1:
-            x_ = self.fuseblock(x, conv_out)
+            x_ = self.fuseblock(x, x_conv)  # x_融合
         else:
-            x_ = torch.cat((x, conv_out), dim=-1)
+            x_ = torch.cat((x, x_conv), dim=-1)
             x_ = self.catmerge(x_)
         if self.downsample is not None:
             x_down = self.downsample(x_, H, W)
+            x_down_conv = self.downsample_conv(x, H, W)
             Wh, Ww = (H + 1) // 2, (W + 1) // 2
-            return x_, H, W, x_down, Wh, Ww, x
+            return x_, H, W, x_down, x_down_conv, Wh, Ww, x, x_conv
         else:
-            return x_, H, W, x, H, W, x
+            return x_, H, W, x, x_conv, H, W, x, x_conv
 
 
 class PatchEmbed(nn.Module):
@@ -591,36 +615,36 @@ class PatchEmbed(nn.Module):
         return x
 
 
-class ResNetBlock(nn.Module):
-    def __init__(self, in_channels = 3, pretrained=True, ):
-        """Declare all needed layers."""
-        super(ResNetBlock, self).__init__()
-        self.model = resnet50(pretrained=pretrained)
-        self.relu = self.model.relu  # Place a hook
-        layers_cfg = [4, 5, 6, 7]
-        self.blocks = nn.ModuleList()
-        self.attens = nn.ModuleList()
-        self.out_channels = [256, 512, 1024, 2048]
-        self.relu = nn.ReLU(inplace=True)
-        for i, num_this_layer in enumerate(layers_cfg):
-            self.blocks.append(list(self.model.children())[num_this_layer])
-        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        self.conv_1 = nn.Conv2d(in_channels, 64, kernel_size=7, stride=2, padding=3,
-                               bias=False)
-
-    def forward(self, x, i):
-        B, C = x.size(0), x.size(1)
-        if i < 1:
-            x = self.conv_1(x)
-            x = self.model.bn1(x)
-            x = self.relu(x)#self.model.relu(x)
-            x = self.model.maxpool(x)
-
-        block = self.blocks[i]
-        x = block(x)
-        if i == 3:
-            x = self.maxpool(x)
-        return x, x.permute(0, 2, 3, 1).view(B, -1, self.out_channels[i])
+# class ResNetBlock(nn.Module):
+#     def __init__(self, in_channels = 3, pretrained=True, ):
+#         """Declare all needed layers."""
+#         super(ResNetBlock, self).__init__()
+#         self.model = resnet50(pretrained=pretrained)
+#         self.relu = self.model.relu  # Place a hook
+#         layers_cfg = [4, 5, 6, 7]
+#         self.blocks = nn.ModuleList()
+#         self.attens = nn.ModuleList()
+#         self.out_channels = [256, 512, 1024, 2048]
+#         self.relu = nn.ReLU(inplace=True)
+#         for i, num_this_layer in enumerate(layers_cfg):
+#             self.blocks.append(list(self.model.children())[num_this_layer])
+#         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+#         self.conv_1 = nn.Conv2d(in_channels, 64, kernel_size=7, stride=2, padding=3,
+#                                bias=False)
+#
+#     def forward(self, x, i):
+#         B, C = x.size(0), x.size(1)
+#         if i < 1:
+#             x = self.conv_1(x)
+#             x = self.model.bn1(x)
+#             x = self.relu(x)#self.model.relu(x)
+#             x = self.model.maxpool(x)
+#
+#         block = self.blocks[i]
+#         x = block(x)
+#         if i == 3:
+#             x = self.maxpool(x)
+#         return x, x.permute(0, 2, 3, 1).view(B, -1, self.out_channels[i])
 
 class ISwinTransformerV3(nn.Module):
     """ Swin Transformer backbone.
@@ -690,6 +714,10 @@ class ISwinTransformerV3(nn.Module):
         self.patch_embed = PatchEmbed(
             patch_size=patch_size, embed_dim=embed_dim,
             norm_layer=norm_layer if self.patch_norm else None)
+        self.patch_embed_conv = PatchEmbed(
+            patch_size=patch_size, embed_dim=embed_dim,
+            norm_layer=norm_layer if self.patch_norm else None
+        )
 
         # absolute position embedding
         if self.ape:
@@ -729,7 +757,18 @@ class ISwinTransformerV3(nn.Module):
                 stage=i_layer)
             self.layers.append(layer)
 
-        self.blocks = ResNetBlock()
+        # self.blocks = SwinTransformerBlock(
+        #         dim=dim,
+        #         num_heads=num_heads,
+        #         window_size=window_size,
+        #         shift_size=0 if (i % 2 == 0) else window_size // 2,
+        #         mlp_ratio=mlp_ratio,
+        #         qkv_bias=qkv_bias,
+        #         qk_scale=qk_scale,
+        #         drop=drop,
+        #         attn_drop=attn_drop,
+        #         drop_path=drop_path[i] if isinstance(drop_path, list) else drop_path,
+        #         norm_layer=norm_layer)
 
         num_features = [int(embed_dim * 2 ** i) for i in range(self.num_layers)]
         self.num_features = num_features
@@ -804,15 +843,21 @@ class ISwinTransformerV3(nn.Module):
             x = x[:, 0:3, :, :]
 
         x = self.patch_embed(x)
+        x_conv = self.patch_embed_conv(x_conv)
+
 
         Wh, Ww = x.size(2), x.size(3)
         if self.ape:
             # interpolate the position embedding to the corresponding size
             absolute_pos_embed = F.interpolate(self.absolute_pos_embed, size=(Wh, Ww), mode='bicubic')
             x = (x + absolute_pos_embed).flatten(2).transpose(1, 2)  # B Wh*Ww C
+            x_conv = (x_conv + absolute_pos_embed).flatten(2).transpose(1, 2)
         else:
             x = x.flatten(2).transpose(1, 2)
+            x_conv = x_conv.flatten(2).transpose(1, 2)
+
         x = self.pos_drop(x)
+        x_conv = self.pos_drop(x_conv)
 
         outs = []
 
@@ -821,11 +866,11 @@ class ISwinTransformerV3(nn.Module):
 
         for i in range(self.num_layers):
             layer = self.layers[i]
-            x_conv, conv_out = self.blocks(x_conv, i)
-            x_out, H, W, x, Wh, Ww, x_ = layer(x, conv_out, Wh, Ww)
+            # x_conv, conv_out = self.blocks(x_conv, i)
+            x_out, H, W, x, x_conv, Wh, Ww, x_, x_conv_ = layer(x, x_conv, Wh, Ww)
             x_out = x_out if (i < self.num_layers - 1) else x
 
-            A_output.append(x_conv)
+            A_output.append(x_conv_.view(-1, H, W, self.num_features[i]).permute(0, 3, 1, 2).contiguous())
             x__ = x_.view(-1, H, W, self.num_features[i]).permute(0, 3, 1, 2).contiguous()
             B_output.append(x__)
 

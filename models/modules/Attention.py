@@ -64,6 +64,11 @@ class Attention(nn.Module):
                 m.bias.data.zero_()
 
     def forward(self, x, H, W):
+        length = 3
+        if len(x.shape) == 4:
+            length = 4
+            x = x.reshape(x.shape[0], x.shape[1], H * W).permute(0, 2, 1)
+        # H, W = int(math.sqrt(x.shape[1])), int(math.sqrt(x.shape[1]))
         B, N, C = x.shape  # B: 2 C: 128 N: 4096
         q = self.q(x).reshape(B, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)   # --[B, num_heads, N, C // num_heads]
         if self.sr_ratio > 1:# and self.sr_ratio != 8:
@@ -79,9 +84,16 @@ class Attention(nn.Module):
             attn1 = (q[:, :self.num_heads//2] @ k1.transpose(-2, -1)) * self.scale  # --[2, 4, 256, 64]
             attn1 = attn1.softmax(dim=-1)
             attn1 = self.attn_drop(attn1)
-            v1 = v1 + self.local_conv1(v1.transpose(1, 2).reshape(B, -1, C//2).
-                                    transpose(1, 2).view(B,C//2, H//self.sr_ratio, W//self.sr_ratio)).\
-                view(B, C//2, -1).view(B, self.num_heads//2, C // self.num_heads, -1).transpose(-1, -2)  # v1: [B, num_heads//2, N // sr_ratio ** 2, C // num_heads]
+            v1 = v1 + self.local_conv1(v1.transpose(1, 2).contiguous().reshape(B, -1, C//2).
+                                    transpose(1, 2).contiguous().view(B,C//2, H//self.sr_ratio, W//self.sr_ratio)).\
+                view(B, C//2, -1).view(B, self.num_heads//2, C // self.num_heads, -1).transpose(-1, -2).contiguous()  # v1: [B, num_heads//2, N // sr_ratio ** 2, C // num_heads]
+            # v1_transposed = v1.transpose(1, 2).contiguous()
+            # v1_reshaped = v1_transposed.reshape(B, -1, C // 2)
+            #
+            # v1 = v1 + self.local_conv1(v1_reshaped).transpose(1, 2).contiguous().reshape(B, C // 2, H // self.sr_ratio,
+            #                                                                              W // self.sr_ratio). \
+            #     reshape(B, C // 2, -1).reshape(B, self.num_heads // 2, C // self.num_heads, -1).transpose(-1, -2)
+
             x1 = (attn1 @ v1).transpose(1, 2).reshape(B, N, C//2)   # [2, 4096, 32]
             attn2 = (q[:, self.num_heads // 2:] @ k2.transpose(-2, -1)) * self.scale  # [2, 1, 4096, 256]
             attn2 = attn2.softmax(dim=-1)
@@ -133,6 +145,9 @@ class Attention(nn.Module):
 
         x = self.proj(x)
         x = self.proj_drop(x)  # [2, 4096, 128]
+
+        if length == 4:
+            x = x.permute(0, 2, 1).reshape(B, C, H, W)
 
         return x
 

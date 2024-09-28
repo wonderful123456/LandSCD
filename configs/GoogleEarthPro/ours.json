@@ -2,7 +2,7 @@
     "/": "===========================================model setting=============================================",
     "only_bcd": false,
     "only_seg": false,
-    "model": "RegularLandSCD",
+    "model": "RegularLandSCDV2",
     "backbone": "efficientnet-b0",
     "pretrained": true,
     "num_channel": 6,
@@ -41,7 +41,7 @@
     "val_batch_size": 8,
     "///////": "=====================================optimaizer================================================",
     "epochs": 100,
-    "learning_rate": 0.00025,
+    "learning_rate": 0.0003,
     "momentum": 0.9,
     "weight_decay": 0.0005,
     "lr_scheduler": "step",
@@ -54,6 +54,6 @@
     "dataset_path": "C:\\Users\\zyy\\Documents\\Tencent Files\\919688409\\FileRecv\\regularCultivatedLandDatasetsV1",
     "result_dir": "./results/GEP",
     "/////////": "=====================================others==================================================",
-    "resume": null,
+    "resume": true,
     "print_step": 50
 }

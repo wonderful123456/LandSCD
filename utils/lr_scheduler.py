@@ -57,6 +57,15 @@ class LR_Scheduler(object):
             print('\n=>Epoches %i, learning rate = %.6f, \
                 previous best = %.4f' % (epoch, lr, best_pred))
         self.epoch = epoch
+
+        import logging
+        logging.debug(f"Current learning rate: {lr}")
+
+        logging.basicConfig(level=logging.DEBUG)
+        if isinstance(lr, complex):
+            logging.error(f"Learning rate is a complex number: {lr}")
+            # 可以选择取其实部或虚部进行处理
+            lr = lr.real  # 或者 lr.imag
         assert lr >= 0
         self._adjust_learning_rate(optimizer, lr)
 
