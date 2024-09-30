@@ -8,7 +8,7 @@ from torch.optim.lr_scheduler import StepLR
 from tqdm import tqdm
 
 from dataset.CD_dataset import *
-from loss.losses import BCDLoss, AdditionalBackgroundSupervision
+from loss.losses_SCD import BCDLoss, AdditionalBackgroundSupervision
 from utils.callbacks import AverageMeter
 from utils.evaluator import BCDEvaluator, SEGEvaluator
 from utils.helper import get_lr, seed_torch, get_model
@@ -292,9 +292,9 @@ def main(args):
                     evaluator_bcd.add_batch(label_BCD.cpu().numpy().astype('int').squeeze(), pred_bcd)
 
                 if not args.only_bcd and args.separate_val_seg:
-                    pred_seg_A = torch.argmax(outputs['seg_A'], 1).cpu().detach().numpy().astype('int')
+                    pred_seg_A = torch.argmax(outputs['seg_A'], 1).cpu().detach().numpy()#.astype('int')
                     evaluator_seg_A.add_batch(label_SGA.squeeze(dim=1).cpu().numpy().astype('int'), pred_seg_A)
-                    pred_seg_B = torch.argmax(outputs['seg_B'], 1).cpu().detach().numpy().astype('int')
+                    pred_seg_B = torch.argmax(outputs['seg_B'], 1).cpu().detach().numpy()#.astype('int')
                     evaluator_seg_B.add_batch(label_SGB.squeeze(dim=1).cpu().numpy().astype('int'), pred_seg_B)
 
                     # label_seg = torch.cat([label_SGA.squeeze(dim=1), label_SGB.squeeze(dim=1)], dim=0)

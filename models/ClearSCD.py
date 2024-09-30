@@ -3,7 +3,7 @@ import torchvision
 import torch.nn as nn
 import torch.nn.functional as F
 
-from loss.losses import BSCCLoss
+from loss.losses_SCD import BSCCLoss
 from models.segmentation_models_pytorch_myself.base import SegmentationHead
 from models.segmentation_models_pytorch_myself.decoders import FPNDecoder
 from models.segmentation_models_pytorch_myself.encoders.resnet import (ResNetEncoder, resnet_encoders)

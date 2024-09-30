@@ -160,5 +160,6 @@ class CDDataset(ImageDataset):
         # print(cls_num_list = [0] * 2)
         # print(label.max())
         # print('img shape is ', img.shape)
-        return {'img_A': img, 'img_B': img_B, 'label_BCD': label, 'label_SGA': label_A, 'label_SGB': label_B}
+        return  img, label_A
+        # return {'img_A': img, 'img_B': img_B, 'label_BCD': label, 'label_SGA': label_A, 'label_SGB': label_B}
 
