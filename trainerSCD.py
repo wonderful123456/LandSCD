@@ -364,7 +364,8 @@ class CDTrainer():
         self.batch = batch
 
         img = batch[0].to(self.device)
-        self.G_pred, self.G_pred_B, self.G_pred_CH = self.net_G(img)[0], self.net_G(img)[1], self.net_G(img)[2]
+        img_B = batch[2].to(self.device)
+        self.G_pred, self.G_pred_B, self.G_pred_CH = self.net_G(img, img_B)[0], self.net_G(img, img_B)[1], self.net_G(img, img_B)[2]
 
 
     def _backward_G(self):
@@ -412,7 +413,6 @@ class CDTrainer():
             self._collect_epoch_states()
             self._update_training_acc_curve()
             self._update_lr_schedulers()
-
 
             ################## Eval ##################
             ##########################################
