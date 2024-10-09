@@ -154,7 +154,7 @@ class WindowAttention(nn.Module):
 
         # cosine attention
         attn = (F.normalize(q, dim=-1) @ F.normalize(k, dim=-1).transpose(-2, -1))
-        logit_scale = torch.clamp(self.logit_scale, max=torch.log(torch.tensor(1. / 0.01))).exp()
+        logit_scale = torch.clamp(self.logit_scale, max=torch.log(torch.tensor(1. / 0.01)).to('cuda')).exp()
         attn = attn * logit_scale
 
         relative_position_bias_table = self.cpb_mlp(self.relative_coords_table).view(-1, self.num_heads)
@@ -532,7 +532,7 @@ class SwinTransformerV2(nn.Module):
                  window_size=8, mlp_ratio=4., qkv_bias=True,
                  drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1,
                  norm_layer=nn.LayerNorm, ape=False, patch_norm=True,
-                 use_checkpoint=False, pretrained_window_sizes=[0, 0, 0, 0], **kwargs):
+                 use_checkpoint=False, pretrained_window_sizes=[8, 8, 8, 8], **kwargs):
         super().__init__()
 
         self.num_classes = num_classes
@@ -583,6 +583,7 @@ class SwinTransformerV2(nn.Module):
             self.layers.append(layer)
 
         # self.norm = [norm_layer(self.num_features[i]) for i in range(self.num_layers)]
+        self.norm = norm_layer(self.num_features[3])
         self.avgpool = nn.AdaptiveAvgPool1d(1)
         # self.head = nn.Linear(self.num_features[3], num_classes) if num_classes > 0 else nn.Identity()
 
@@ -619,18 +620,22 @@ class SwinTransformerV2(nn.Module):
             x = layer(x)
             B, H, W = x.shape[0], int(math.sqrt(x.shape[1])), int(math.sqrt(x.shape[1]))
             # x = self.norm[i](x)
-            x_list.append(x.view(B, H, W, self.num_features[i]))
+            if i == 3:
+                x = self.norm(x)
+            x_list.append(x.view(B, self.num_features[i], H, W))
             i += 1# x_list add by ljc
 
+        x = x.reshape(-1, 768, int(math.sqrt(x.shape[1])), int(math.sqrt(x.shape[1])))
         # x = self.norm(x)  # B L C
-        x = self.avgpool(x.transpose(1, 2))  # B C 1
-        x = torch.flatten(x, 1)
-        return x#, x_list  # x_list add by ljc
+        # x = self.avgpool(x.transpose(1, 2))  # B C 1
+        # x = torch.flatten(x, 1)
+        return x, x_list  # x_list add by ljc
 
     def forward(self, x):
-        x = self.forward_features(x)
+        x, x_list = self.forward_features(x)
+        # x = x.reshape(-1, 768, int(math.sqrt(x.shape[1])), int(math.sqrt(x.shape[1])))
         # x = self.head(x), x_list
-        return x#, x_list
+        return x, x_list
 
     def flops(self):
         flops = 0
@@ -644,6 +649,6 @@ class SwinTransformerV2(nn.Module):
 
 
 if __name__ == '__main__':
-    img =  torch.randn(2, 3, 256, 256)
-    models = SwinTransformerV2(img_size=256, patch_size=8, num_classes=6, in_chans=3, use_attens=1)
-    print(models(img).shape)
+    img =  torch.randn(2, 3, 256, 256).to('cuda')
+    models = SwinTransformerV2(img_size=256, patch_size=4, num_classes=6, in_chans=3, use_attens=1).to('cuda')
+    print(models(img)[0].shape)

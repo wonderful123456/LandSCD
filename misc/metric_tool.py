@@ -71,14 +71,14 @@ def harmonic_mean(xs):
 
 def cm2F1(confusion_matrix):
     hist = confusion_matrix
-    n_class = hist.shape[0]
+    # n_class = hist.shape[0]
     tp = np.diag(hist)
     sum_a1 = hist.sum(axis=1)
     sum_a0 = hist.sum(axis=0)
     # ---------------------------------------------------------------------- #
     # 1. Accuracy & Class Accuracy
     # ---------------------------------------------------------------------- #
-    acc = tp.sum() / (hist.sum() + np.finfo(np.float32).eps)
+    # acc = tp.sum() / (hist.sum() + np.finfo(np.float32).eps)
 
     # recall
     recall = tp / (sum_a1 + np.finfo(np.float32).eps)
@@ -120,8 +120,8 @@ def cm2score(confusion_matrix):
     iu = tp / (sum_a1 + hist.sum(axis=0) - tp + np.finfo(np.float32).eps)
     mean_iu = np.nanmean(iu)
 
-    freq = sum_a1 / (hist.sum() + np.finfo(np.float32).eps)
-    fwavacc = (freq[freq > 0] * iu[freq > 0]).sum()
+    # freq = sum_a1 / (hist.sum() + np.finfo(np.float32).eps)
+    # fwavacc = (freq[freq > 0] * iu[freq > 0]).sum()
 
     #
     cls_iou = dict(zip(['iou_'+str(i) for i in range(n_class)], iu))
@@ -154,6 +154,7 @@ def get_confuse_matrix(num_classes, label_gts, label_preds):
         hist = np.bincount(num_classes * label_gt[mask].astype(int) + label_pred[mask],
                            minlength=num_classes**2).reshape(num_classes, num_classes)
         return hist
+
     confusion_matrix = np.zeros((num_classes, num_classes))
     for lt, lp in zip(label_gts, label_preds):
         confusion_matrix += __fast_hist(lt.flatten(), lp.flatten())

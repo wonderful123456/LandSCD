@@ -249,8 +249,8 @@ class BiSRNet(nn.Module):
         change = self.CD(x)
         return change
 
-    def forward(self, x):
-        x1, x2 = x[:,0:3,:,:], x[:,3:6,:,:]
+    def forward(self, x1, x2):
+        # x1, x2 = x[:,0:3,:,:], x[:,3:6,:,:]
         x_size = x1.size()
         x1 = self.base_forward(x1)
         x2 = self.base_forward(x2)
@@ -260,10 +260,13 @@ class BiSRNet(nn.Module):
         out1 = self.classifier1(x1)
         out2 = self.classifier2(x2)
 
-        return {'BCD': F.upsample(change, x_size[2:], mode='bilinear'), 'seg_A': F.upsample(out1, x_size[2:],
-                                                                           mode='bilinear'), 'seg_B': F.upsample(out2,
-                                                                                                        x_size[2:],
-                                                                                                        mode='bilinear')}
+        return F.upsample(out1, x_size[2:], mode='bilinear'), F.upsample(out2, x_size[2:],mode='bilinear'), \
+                F.upsample(change, x_size[2:], mode='bilinear')
+        #                                                                    mode='bilinear')
+        # return {'BCD': F.upsample(change, x_size[2:], mode='bilinear'), 'seg_A': F.upsample(out1, x_size[2:],
+        #                                                                    mode='bilinear'), 'seg_B': F.upsample(out2,
+        #                                                                                                 x_size[2:],
+        #                                                                                                 mode='bilinear')}
 
     # def forward(self, x1, x2):
     #     x_size = x1.size()

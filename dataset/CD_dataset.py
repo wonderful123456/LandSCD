@@ -155,11 +155,11 @@ class CDDataset(ImageDataset):
 
         # print('label shape is ', label.shape)
 
-        [img, img_B], [label], [label_A], [label_B] = self.augm.transform([img_A, img_B], [label], [label_A], [label_B], to_tensor=self.to_tensor)
-        cls_num_list = [0] * 2
+        [img_A, img_B], [label], [label_A], [label_B] = self.augm.transform([img_A, img_B], [label], [label_A], [label_B], to_tensor=self.to_tensor)
+        # cls_num_list = [0] * 2
         # print(cls_num_list = [0] * 2)
         # print(label.max())
         # print('img shape is ', img.shape)
-        return  img, label_A
+        return  img_A, label_A, img_B, label_B, label
         # return {'img_A': img, 'img_B': img_B, 'label_BCD': label, 'label_SGA': label_A, 'label_SGB': label_B}
 

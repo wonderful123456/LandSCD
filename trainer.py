@@ -18,6 +18,9 @@ import loss.losses as losses
 from misc.logger_tool import Logger, Timer
 from models.danet import get_danet
 from torch.optim import lr_scheduler
+
+from build import Builder
+
 def get_scheduler(optimizer, args):
     """Return a learning rate scheduler
 
@@ -40,6 +43,13 @@ def get_scheduler(optimizer, args):
         step_size = args.max_epochs//3
         # args.lr_decay_iters
         scheduler = lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=0.1)
+    elif args.lr_policy == 'CosineAnnealing':
+        scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=80, eta_min=1e-6, last_epoch=-1, verbose=False)
+    elif args.lr_policy == 'poly':
+        scheduler = lr_scheduler.PolynomialLR(optimizer, power=0.9, total_iters=300, last_epoch=-1, verbose=False)
+    elif args.lr_policy == 'ReduceLRO':
+        scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10, threshold=0.0001,
+                                                   threshold_mode='rel', cooldown=0, min_lr=0, eps=1e-8, verbose=False)
     else:
         return NotImplementedError('learning rate policy [%s] is not implemented', args.lr_policy)
     return scheduler
@@ -141,49 +151,10 @@ class CDTrainer():
     def __init__(self, args, dataloaders):  # 初始化参数
 
         self.dataloaders = dataloaders
-
         self.n_class = args.n_class
-        # define G
-        # self.net_G = define_G(args=args, gpu_ids=args.gpu_ids)
-        model_cfg = dict(
-            type='FarSeg',
-            params=dict(
-                resnet_encoder=dict(
-                    resnet_type='resnet50',
-                    include_conv5=True,
-                    batchnorm_trainable=True,
-                    pretrained=False,
-                    freeze_at=0,
-                    # 8, 16 or 32
-                    output_stride=32,
-                    with_cp=(False, False, False, False),
-                    stem3_3x3=False,
-                ),
-                # fpn=dict(
-                #     in_channels_list=(256, 512, 1024, 2048),
-                #     out_channels=256,
-                #     conv_block=fpn.default_conv_block,
-                #     top_blocks=None,
-                # ),
-                scene_relation=dict(
-                    in_channels=1024,
-                    channel_list=(32, 64, 128, 256),
-                    out_channels=256,
-                    scale_aware_proj=True,
-                ),
-                decoder=dict(
-                    in_channels=256,
-                    out_channels=128,
-                    in_feat_output_strides=(4, 8, 16, 32),
-                    out_feat_output_stride=4,
-                    norm_fn=nn.BatchNorm2d,
-                    num_groups_gn=None
-                ),
-                num_classes=7,
-            )
-        )
-        self.net_G = get_danet()
 
+        build = Builder(args)
+        self.net_G = build.build_model()
         self.device = torch.device("cuda:%s" % args.gpu_ids[0] if torch.cuda.is_available() and len(args.gpu_ids)>0
                                    else "cpu")
         print(self.device)
@@ -199,8 +170,9 @@ class CDTrainer():
 
         # define lr schedulers
         self.exp_lr_scheduler_G = get_scheduler(self.optimizer_G, args)
-
-        self.running_metric = ConfuseMatrixMeter(n_class=self.n_class)
+        self.running_metric = ConfuseMatrixMeter(n_class=self.n_class)      # A 时相
+        self.running_metric_B = ConfuseMatrixMeter(n_class=self.n_class)    # B 时相
+        self.running_metric_change = ConfuseMatrixMeter(n_class=2)          # 变化
 
         # define logger file
         logger_path = os.path.join(args.checkpoint_dir, 'log.txt')
@@ -212,9 +184,14 @@ class CDTrainer():
 
         #  training log
         self.epoch_acc = 0
+        self.epoch_acc_B = 0   # add by ljc
+        self.epoch_acc_CH = 0  # add by ljc
+        self.epoch_Acc = 0  # add by ljc
+        self.cur_score = 0  # add by ljc
         self.best_val_acc = 0.0
         self.best_epoch_id = 0
         self.epoch_to_start = 0
+        self.G_loss_total = 0
         self.max_num_epochs = args.max_epochs
 
         self.global_step = 0
@@ -222,6 +199,8 @@ class CDTrainer():
         self.total_steps = (self.max_num_epochs - self.epoch_to_start)*self.steps_per_epoch
 
         self.G_pred = None
+        self.G_pred_B = None
+        self.G_pred_CH = None
         self.G_bdpred = None   # add by ljc
         self.pred_vis = None
         self.batch = None
@@ -317,26 +296,28 @@ class CDTrainer():
         update metric
         """
 
+        # A Seg
         target = self.batch[1].to(self.device).detach()
-        # print('target.shape is ', target.shape)  # [4, 1, 150, 150]  # [2, 6, 256, 256]
-
         G_pred = self.G_pred.detach()
-
-        # G_pred = torch.argmax(G_pred, dim=1)
         G_pred = torch.argmax(G_pred, dim=1)  # 第二维
 
-        # print('G_pred shape is ', G_pred.shape)  # [2, 6, 256, 256]
+        # B Seg
+        target_B = self.batch[3].to(self.device).detach()
+        G_pred_B = self.G_pred_B.detach()
+        G_pred_B = torch.argmax(G_pred_B, dim=1)
 
-        # print('target shape is', target.shape[0], target.shape[1], target.shape[2], target.shape[3])
-        # 处理时序
-        # target = target.reshape(target.shape[0] * target.shape[1], target.shape[2], target.shape[3])
-        # G_pred = G_pred.reshape(G_pred.shape[0] * G_pred.shape[1], G_pred.shape[2], G_pred.shape[3])
-
-
-        # print('G_pred.shape is ', G_pred.shape)  # [4, 152, 152]
+        # Change
+        target_CH = self.batch[4].to(self.device).detach()
+        G_pred_CH = self.G_pred_CH.detach()
+        G_pred_CH = torch.argmax(G_pred_CH, dim=1)
 
         current_score = self.running_metric.update_cm(pr=G_pred.cpu().numpy(), gt=target.cpu().numpy())
-        return current_score
+        current_score_B = self.running_metric_B.update_cm(pr=G_pred_B.cpu().numpy(), gt=target_B.cpu().numpy())
+        current_score_CH = self.running_metric_change.update_cm(pr=G_pred_CH.cpu().numpy(), gt=target_CH.cpu().numpy())
+
+        self.cur_score = current_score + current_score_B + current_score_CH
+
+        return self.cur_score
 
     def _collect_running_batch_states(self):
 
@@ -348,19 +329,31 @@ class CDTrainer():
 
         imps, est = self._timer_update()
         if np.mod(self.batch_id, 100) == 1:
-            message = 'Is_training: %s. [%d,%d][%d,%d], imps: %.2f, est: %.2fh, G_loss: %.5f, running_mf1: %.5f\n' %\
+            message = 'Is_training: %s. [%d,%d][%d,%d], imps: %.2f, est: %.2fh, G_loss: %.5f, G_loss_B: %.5f, G_loss_CH: %.5f , running_mf1: %.5f\n' %\
                       (self.is_training, self.epoch_id, self.max_num_epochs-1, self.batch_id, m,
                      imps*self.batch_size, est,
-                     self.G_loss.item(), running_acc)
+                     self.G_loss.item(), self.G_loss_B.item(), self.G_loss_CH.item(), running_acc)
             self.logger.write(message)
 
-    def _collect_epoch_states(self):
+    def _collect_epoch_states(self, epoch):
         scores = self.running_metric.get_scores()
-        self.epoch_acc = scores['mf1']
+        scores_B = self.running_metric_B.get_scores()
+        scores_CH = self.running_metric_change.get_scores()
+        self.epoch_acc = scores['miou']
+        self.epoch_acc_B = scores_B['miou']
+        self.epoch_acc_CH = scores_CH['miou']
+        self.epoch_Acc = self.epoch_acc+self.epoch_acc_B+self.epoch_acc_CH
         self.logger.write('Is_training: %s. Epoch %d / %d, epoch_mF1= %.5f\n' %
-              (self.is_training, self.epoch_id, self.max_num_epochs-1, self.epoch_acc))
+              (self.is_training, self.epoch_id, self.max_num_epochs-1, self.epoch_Acc))
         message = ''
-        for k, v in scores.items():
+        if epoch % 50 == 0:
+            for k, v in scores.items():
+                message += '%s: %.5f ' % (k, v)
+            message += '\n'
+            for k, v in scores_B.items():
+                message += '%s: %.5f ' % (k, v)
+            message += '\n'
+        for k, v in scores_CH.items():
             message += '%s: %.5f ' % (k, v)
         self.logger.write(message+'\n')
         self.logger.write('\n')
@@ -370,12 +363,12 @@ class CDTrainer():
         # save current model
         self._save_checkpoint(ckpt_name='last_ckpt.pt')
         self.logger.write('Lastest model updated. Epoch_acc=%.4f, Historical_best_acc=%.4f (at epoch %d)\n'
-              % (self.epoch_acc, self.best_val_acc, self.best_epoch_id))
+              % (self.epoch_Acc, self.best_val_acc, self.best_epoch_id))
         self.logger.write('\n')
 
         # update the best model (based on eval acc)
-        if self.epoch_acc > self.best_val_acc:
-            self.best_val_acc = self.epoch_acc
+        if self.epoch_Acc > self.best_val_acc:
+            self.best_val_acc = self.epoch_Acc
             self.best_epoch_id = self.epoch_id
             self._save_checkpoint(ckpt_name='best_ckpt.pt')
             self.logger.write('*' * 10 + 'Best model updated!\n')
@@ -383,44 +376,43 @@ class CDTrainer():
 
     def _update_training_acc_curve(self):
         # update train acc curve
-        self.TRAIN_ACC = np.append(self.TRAIN_ACC, [self.epoch_acc])
+        self.TRAIN_ACC = np.append(self.TRAIN_ACC, [self.epoch_Acc])
         np.save(os.path.join(self.checkpoint_dir, 'train_acc.npy'), self.TRAIN_ACC)
 
     def _update_val_acc_curve(self):
         # update val acc curve
-        self.VAL_ACC = np.append(self.VAL_ACC, [self.epoch_acc])
+        self.VAL_ACC = np.append(self.VAL_ACC, [self.epoch_Acc])
         np.save(os.path.join(self.checkpoint_dir, 'val_acc.npy'), self.VAL_ACC)
 
     def _clear_cache(self):
         self.running_metric.clear()
-
-
+        self.running_metric_B.clear()
+        self.running_metric_change.clear()
     def _forward_pass(self, batch):
         self.batch = batch
-        # img_in1 = batch['A'].to(self.device)
-        # img_in2 = batch['B'].to(self.device)
-        img = batch[0].to(self.device)
-        # index = batch[2].to(self.device)
-        # print('index shape is ', index.shape)
-        # print('img_in1 shape is ', img_in1.shape)
-        # self.G_pred = self.net_G(img_in1, img_in2)
-        self.G_pred = self.net_G(img)#[0]
-        # self.G_bdpred = self.net_G(img)[1]
-        # print('self.net_G(img)[0] shape is', self.net_G(img)[0].shape )
-        # print('self.net_G(img)[1] shape is', self.net_G(img)[1].shape )
 
+        img = batch[0].to(self.device)
+        img_B = batch[2].to(self.device)
+        self.G_pred, self.G_pred_B, self.G_pred_CH = self.net_G(img, img_B)  #self.net_G(img, img_B)[0], self.net_G(img, img_B)[1], self.net_G(img, img_B)[2]
 
     def _backward_G(self):
-        # print('self.batch[L] shape is ', self.batch['L'].shape)
-        gt = self.batch[1].to(self.device).long()
-        # bd_gt = self.batch[2].to(self.device).float()
-        # print('self.G_pred shape is ', self.G_pred.shape)  # [8, 2, 256, 256]  [8, 6, 4, 256, 256]
-        # print('gt shape is ', gt.shape)  # [8, 1, 256, 256]   [8, 6, 256, 256]
-        self.G_loss = self._pxl_loss.CrossEntropyLoss(self.G_pred, gt.squeeze(dim=1))
-        # self.G_bdloss = self.boundaryloss(self.G_bdpred, bd_gt)
-        self.G_loss = self.G_loss #+ self.G_bdloss
-        self.G_loss.backward(retain_graph=False)
 
+        # A Seg
+        gt = self.batch[1].to(self.device).long()
+        self.G_loss = self._pxl_loss.CrossEntropyLoss(self.G_pred, gt.squeeze(dim=1))
+        # self.G_loss = self.G_loss #+ self.G_bdloss
+        # self.G_loss.backward(retain_graph=False)
+
+        # B Seg
+        gt_B = self.batch[3].to(self.device).long()
+        self.G_loss_B = self._pxl_loss.CrossEntropyLoss(self.G_pred_B, gt_B.squeeze(dim=1))
+        # self.G_loss_B.backward(retain_graph=False)
+
+        # Change
+        gt_CH = self.batch[4].to(self.device).long()
+        self.G_loss_CH = self._pxl_loss.CrossEntropyLoss(self.G_pred_CH, gt_CH.squeeze(dim=1))
+        self.G_loss_total = self.G_loss_CH + self.G_loss + self.G_loss_B
+        self.G_loss_total.backward()
 
     def train_models(self):
 
@@ -445,10 +437,9 @@ class CDTrainer():
                 self._collect_running_batch_states()
                 self._timer_update()
 
-            self._collect_epoch_states()
+            self._collect_epoch_states(epoch=self.epoch_id)
             self._update_training_acc_curve()
             self._update_lr_schedulers()
-
 
             ################## Eval ##################
             ##########################################
@@ -462,11 +453,10 @@ class CDTrainer():
                 with torch.no_grad():
                     self._forward_pass(batch)
                 self._collect_running_batch_states()
-            self._collect_epoch_states()
+            self._collect_epoch_states(epoch=self.epoch_id)
 
             ########### Update_Checkpoints ###########
             ##########################################
             # if self.epoch_id % 5 == 0:      # 每5代保存一次結果,由ljc修改
             self._update_val_acc_curve()
             self._update_checkpoints()
-

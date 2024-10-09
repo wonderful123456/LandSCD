@@ -9,7 +9,7 @@ from misc.logger_tool import Logger
 # import utils
 import torch
 from models.danet import get_danet
-
+from build import Builder
 
 # Decide which device we want to run on
 # torch.cuda.current_device()
@@ -25,13 +25,16 @@ class CDEvaluator():
 
         self.n_class = args.n_class
         # define G
-        self.net_G = get_danet()
+        builder = Builder(args)
+        self.net_G = builder.build_model()
         self.device = torch.device("cuda:%s" % args.gpu_ids[0] if torch.cuda.is_available() and len(args.gpu_ids)>0
                                    else "cpu")
         # print(self.device)
 
         # define some other vars to record the training states
         self.running_metric = ConfuseMatrixMeter(n_class=self.n_class)
+        self.running_metric_B = ConfuseMatrixMeter(n_class=self.n_class)
+        self.running_metric_CH = ConfuseMatrixMeter(n_class=2)
 
         # define logger file
         logger_path = os.path.join(args.checkpoint_dir, 'log_test.txt')
@@ -47,6 +50,8 @@ class CDEvaluator():
         self.steps_per_epoch = len(dataloader)
 
         self.G_pred = None
+        self.G_pred_B = None
+        self.G_pred_CH = None
         self.pred_vis = None
         self.batch = None
         self.is_training = False
@@ -88,12 +93,24 @@ class CDEvaluator():
         target = self.batch[1].to(self.device).detach()
         G_pred = self.G_pred.detach()
         G_pred = torch.argmax(G_pred, dim=1)
+
+        # B Seg
+        target_B = self.batch[3].to(self.device).detach()
+        G_pred_B = self.G_pred_B.detach()
+        G_pred_B = torch.argmax(G_pred_B, dim=1)
+
+        # Change
+        target_CH = self.batch[4].to(self.device).detach()
+        G_pred_CH = self.G_pred_CH.detach()
+        G_pred_CH = torch.argmax(G_pred_CH, dim=1)
         #
         # target = target.reshape(target.shape[0] * target.shape[1], target.shape[2], target.shape[3])
         # G_pred = G_pred.reshape(G_pred.shape[0] * G_pred.shape[1], G_pred.shape[2], G_pred.shape[3])
 
         current_score = self.running_metric.update_cm(pr=G_pred.cpu().numpy(), gt=target.cpu().numpy())
-        return current_score
+        current_score_B = self.running_metric_B.update_cm(pr=G_pred_B.cpu().numpy(), gt=target_B.cpu().numpy())
+        current_score_CH = self.running_metric_CH.update_cm(pr=G_pred_CH.cpu().numpy(), gt=target_CH.cpu().numpy())
+        return current_score + current_score_B + current_score_CH
 
     def _collect_running_batch_states(self):
 
@@ -130,11 +147,11 @@ class CDEvaluator():
 
     def _forward_pass(self, batch):
         self.batch = batch
-        # img_in1 = batch['A'].to(self.device)
-        # img_in2 = batch['B'].to(self.device)
-        img_in1 = batch[0].to(self.device)
-        # self.G_pred = self.net_G(img_in1, img_in2)
-        self.G_pred = self.net_G(img_in1)
+
+        img = batch[0].to(self.device)
+        img_B = batch[2].to(self.device)
+        self.G_pred, self.G_pred_B, self.G_pred_CH = self.net_G(img, img_B)[0], self.net_G(img, img_B)[1], \
+        self.net_G(img, img_B)[2]
 
     def eval_models(self,checkpoint_name='best_ckpt.pt'):
 

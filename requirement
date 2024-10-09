@@ -1,4 +1,4 @@
-python=3.8
+mipython=3.8
 pytorch=2.3.0
 timm=0.4.12
 segmentation-models-pytorch=0.2.1

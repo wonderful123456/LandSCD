@@ -141,8 +141,11 @@ class CDTrainer():
     def __init__(self, args, dataloaders):  # 初始化参数
 
         self.dataloaders = dataloaders
+
         self.n_class = args.n_class
+
         self.net_G = get_danet()
+
         self.device = torch.device("cuda:%s" % args.gpu_ids[0] if torch.cuda.is_available() and len(args.gpu_ids)>0
                                    else "cpu")
         print(self.device)
@@ -158,9 +161,8 @@ class CDTrainer():
 
         # define lr schedulers
         self.exp_lr_scheduler_G = get_scheduler(self.optimizer_G, args)
-        self.running_metric = ConfuseMatrixMeter(n_class=self.n_class)      # A 时相
-        self.running_metric_B = ConfuseMatrixMeter(n_class=self.n_class)    # B 时相
-        self.running_metric_change = ConfuseMatrixMeter(n_class=2)          # 变化
+
+        self.running_metric = ConfuseMatrixMeter(n_class=self.n_class)
 
         # define logger file
         logger_path = os.path.join(args.checkpoint_dir, 'log.txt')
@@ -182,8 +184,6 @@ class CDTrainer():
         self.total_steps = (self.max_num_epochs - self.epoch_to_start)*self.steps_per_epoch
 
         self.G_pred = None
-        self.G_pred_B = None
-        self.G_pred_CH = None
         self.G_bdpred = None   # add by ljc
         self.pred_vis = None
         self.batch = None
@@ -197,15 +197,10 @@ class CDTrainer():
         # define the loss functions
         if args.loss == 'ce':
             self._pxl_loss = SegmentationLosses()
-            # self._pxl_loss = FocalLoss
         elif args.loss == 'bce':
             self._pxl_loss = losses.binary_ce
-            # self._pxl_loss = nn.BCELoss
-        # elif args.loss == ''
         else:
             raise NotImplemented(args.loss)
-
-        # self.boundaryloss = BondaryLoss()
 
         self.VAL_ACC = np.array([], np.float32)
         if os.path.exists(os.path.join(self.checkpoint_dir, 'val_acc.npy')):
@@ -279,25 +274,13 @@ class CDTrainer():
         update metric
         """
 
-        # A Seg
         target = self.batch[1].to(self.device).detach()
+
         G_pred = self.G_pred.detach()
         G_pred = torch.argmax(G_pred, dim=1)  # 第二维
 
-        # B Seg
-        target_B = self.batch[3].to(self.device).detach()
-        G_pred_B = self.G_pred_B.detach()
-        G_pred_B = torch.argmax(G_pred_B, dim=1)
-
-        # Change
-        target_CH = self.batch[4].to(self.device).detach()
-        G_pred_CH = self.G_pred_CH.detach()
-        G_pred_CH = torch.argmax(G_pred_CH, dim=1)
-
         current_score = self.running_metric.update_cm(pr=G_pred.cpu().numpy(), gt=target.cpu().numpy())
-        current_score_B = self.running_metric_B.update_cm(pr=G_pred_B.cpu().numpy(), gt=target_B.cpu().numpy())
-        current_score_CH = self.running_metric_change.update_cm(pr=G_pred_CH.cpu().numpy(), gt=target_CH.cpu().numpy())
-        return current_score + current_score_B + current_score_CH
+        return current_score
 
     def _collect_running_batch_states(self):
 
@@ -317,13 +300,9 @@ class CDTrainer():
 
     def _collect_epoch_states(self):
         scores = self.running_metric.get_scores()
-        scores_B = self.running_metric_B.get_scores()
-        scores_CH = self.running_metric_change.get_scores()
         self.epoch_acc = scores['mf1']
-        self.epoch_acc_B = scores_B['mf1']
-        self.epoch_acc_CH = scores_CH['mf1']
         self.logger.write('Is_training: %s. Epoch %d / %d, epoch_mF1= %.5f\n' %
-              (self.is_training, self.epoch_id, self.max_num_epochs-1, self.epoch_acc+self.epoch_acc_B+self.epoch_acc_CH))
+              (self.is_training, self.epoch_id, self.max_num_epochs-1, self.epoch_acc))
         message = ''
         for k, v in scores.items():
             message += '%s: %.5f ' % (k, v)
@@ -358,34 +337,16 @@ class CDTrainer():
 
     def _clear_cache(self):
         self.running_metric.clear()
-        self.running_metric_B.clear()
-        self.running_metric_change.clear()
+
     def _forward_pass(self, batch):
         self.batch = batch
-
         img = batch[0].to(self.device)
-        img_B = batch[2].to(self.device)
-        self.G_pred, self.G_pred_B, self.G_pred_CH = self.net_G(img, img_B)[0], self.net_G(img, img_B)[1], self.net_G(img, img_B)[2]
-
+        self.G_pred = self.net_G(img)#[0]
 
     def _backward_G(self):
-
-        # A Seg
         gt = self.batch[1].to(self.device).long()
         self.G_loss = self._pxl_loss.CrossEntropyLoss(self.G_pred, gt.squeeze(dim=1))
-        # self.G_loss = self.G_loss #+ self.G_bdloss
         self.G_loss.backward(retain_graph=False)
-
-        # B Seg
-        gt_B = self.batch[3].to(self.device).long()
-        self.G_loss_B = self._pxl_loss.CrossEntropyLoss(self.G_pred_B, gt_B.squeeze(dim=1))
-        self.G_loss_B.backward(retain_graph=False)
-
-        # Change
-        gt_CH = self.batch[4].to(self.device).long()
-        self.G_loss_CH = self._pxl_loss.CrossEntropyLoss(self.G_pred_CH, gt_CH.squeeze(dim=1))
-        self.G_loss_CH.backward(retain_graph=False)
-
 
     def train_models(self):
 

@@ -67,7 +67,7 @@ def test(args):
 
 # def main():
 
-    args = ParserOptions().parse()  # get training options
+    # args = ParserOptions().parse()  # get training options
     # trainer = Trainer(args)
     #
     # print_training_info(args)
@@ -91,14 +91,17 @@ if __name__ == "__main__":
     # ------------
     parser = ArgumentParser()
     parser.add_argument('--gpu_ids', type=str, default='0,1', help='gpu ids: e.g. 0  0,1,2, 0,2. use -1 for CPU')
-    parser.add_argument('--train_model', default='DANet', type=str)
-    parser.add_argument('--project_name', default='DANet', type=str)
+    parser.add_argument('--train_model', default='SwinTransformerUperNet', type=str)
+    parser.add_argument('--project_name', default='SwinTransformerUperNet_T2', type=str)
     parser.add_argument('--checkpoint_root', default='checkpoints/', type=str)
 
     # data
     parser.add_argument('--num_workers', default=4, type=int)
     parser.add_argument('--dataset', default='CDDataset', type=str)
     parser.add_argument('--data_name', default='GEP', type=str)
+
+    parser.add_argument('--num_channel', default=6, type=int)
+    # parser.add_argument('--num_channel', default=3, type=int)
 
     parser.add_argument('--batch_size', default=8, type=int)
     parser.add_argument('--split', default="train", type=str)
@@ -116,16 +119,16 @@ if __name__ == "__main__":
     parser.add_argument('--num_expert', default=1, type=int)
 
     # optimizer
-    parser.add_argument('--optimizer', default='adam', type=str)
-    parser.add_argument('--lr', default=0.0003, type=float)
+    parser.add_argument('--doptimizer', default='adam', type=str)
+    parser.add_argument('--lr', default=5e-4, type=float)
     parser.add_argument('--max_epochs', default=300, type=int)
-    parser.add_argument('--lr_policy', default='linear', type=str,
+    parser.add_argument('--lr_policy', default='poly', type=str,
                         help='linear | step')
-    parser.add_argument('--lr_decay_iters', default=300, type=int)
+    parser.add_argument('--lr_decay_iters', default=30, type=int)
 
     args = parser.parse_args()
 
-    
+
     get_device(args)
     # print(args.gpu_ids)
 

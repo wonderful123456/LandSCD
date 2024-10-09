@@ -23,7 +23,7 @@ class RegularLandSCDV1(nn.Module):
             embed_dim=96,
             depths=[2, 2, 6, 2],
             num_heads=[2, 4, 8, 16],
-            window_size=7,
+            window_size=8,
             mlp_ratio=4.,
             qkv_bias=True,
             qk_scale=None,
@@ -93,7 +93,8 @@ class RegularLandSCDV1(nn.Module):
         main_ = F.interpolate(main_, size, mode='bilinear', align_corners=True)
         a_seg_out = F.interpolate(a_seg_out, size, mode='bilinear', align_corners=True)
         b_seg_out = F.interpolate(b_seg_out, size, mode='bilinear', align_corners=True)
-        return {'BCD': main_, 'seg_A': a_seg_out, 'seg_B': b_seg_out}  # 主分类器，辅助分类器
+        return  a_seg_out, b_seg_out, main_
+        # return {'BCD': main_, 'seg_A': a_seg_out, 'seg_B': b_seg_out}  # 主分类器，辅助分类器
 
 if __name__ == '__main__':
     import torch
