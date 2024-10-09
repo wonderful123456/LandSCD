@@ -346,13 +346,13 @@ class CDTrainer():
         self.logger.write('Is_training: %s. Epoch %d / %d, epoch_mF1= %.5f\n' %
               (self.is_training, self.epoch_id, self.max_num_epochs-1, self.epoch_Acc))
         message = ''
-        if epoch % 50 == 0:
-            for k, v in scores.items():
-                message += '%s: %.5f ' % (k, v)
-            message += '\n'
-            for k, v in scores_B.items():
-                message += '%s: %.5f ' % (k, v)
-            message += '\n'
+        # if epoch % 50 == 0:
+        for k, v in scores.items():
+            message += '%s: %.5f ' % (k, v)
+        message += '\n'
+        for k, v in scores_B.items():
+            message += '%s: %.5f ' % (k, v)
+        message += '\n'
         for k, v in scores_CH.items():
             message += '%s: %.5f ' % (k, v)
         self.logger.write(message+'\n')
