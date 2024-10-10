@@ -16,7 +16,7 @@ from models.utils.checkpoint import load_checkpoint
 from models.utils.logger import get_root_logger
 
 # from models.modules.MultiScaleAttention import *
-from models.modules.Attention import Attention
+from models.modules.Attention import SpatialMultiAttention
 
 class Mlp(nn.Module):
     """ Multilayer perceptron."""
@@ -232,11 +232,11 @@ class ContextFuseBlock(nn.Module):
         self.norm1 = norm_layer(dim)
         self.norm2 = norm_layer(dim)
         # self.lk = nn.Linear(conv_dim, dim, bias=False)
-        self.attn = ContextAttention(
-            dim, num_heads=num_heads,
-            qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
+        # self.attn = ContextAttention(
+        #     dim, num_heads=num_heads,
+        #     qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
 
-        self.attn = Attention(
+        self.attn = SpatialMultiAttention(
             dim,
             num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale,
             attn_drop=attn_drop, proj_drop=drop, sr_ratio=sr_ratio)

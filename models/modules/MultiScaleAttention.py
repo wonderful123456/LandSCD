@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from fontTools.unicodedata import block
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 import math
 
@@ -555,34 +556,34 @@ class Attention(nn.Module):
             x2 = (attn2 @ v2).transpose(1, 2).reshape(B, N, C//2)  # [2, 4096, 32]  [2, 1024, 64] [2, 256, 128]
 
             x = torch.cat([x1,x2], dim=-1)  # [2, 4096, 64]
-        # elif self.sr_ratio == 8:
-        #     x_ = x.permute(0, 2, 1).reshape(B, C, H, W)  # [B, C, H, W]
-        #     x_1 = self.act(self.norm1(self.sr1(x_).reshape(B, C, -1).permute(0, 2, 1)))  # [B, (H // sr_ratio) * (W // sr_ratio), C]
-        #     x_2 = self.act(self.norm2(self.sr2(x_).reshape(B, C, -1).permute(0, 2, 1)))  # [B, (H // (sr_ratio // 2)) * (W // (sr_ratio // 2)), C]
-        #     kv1 = self.kv1(x_1).reshape(B, -1, 2, self.num_heads // 2, C // self.num_heads).permute(2, 0, 3, 1,
-        #                                                                                             4)  # [2, B, num_heads // 2, (H // sr_ratio) * (W // sr_ratio), C // num_heads]
-        #     kv2 = self.kv2(x_2).reshape(B, -1, 2, self.num_heads // 2, C // self.num_heads).permute(2, 0, 3, 1,
-        #                                                                                             4)  # [2, B, num_heads // 2, (H // (sr_ratio // 2)) * (W // (sr_ratio // 2)), C // num_heads]
-        #     k1, v1 = kv1[0], kv1[1]  # B head N C  k1: [B, 1, (H // sr_ratio) * (W // sr_ratio), C // num_heads] v1: [B, 1, (H // sr_ratio) * (W // sr_ratio), C // num_heads]
-        #     k2, v2 = kv2[0], kv2[1]  # k2: [2, 1, 256, 64] v1: [2, 1, 256, 64]
-        #     q = self.q_s(x).reshape(B, N, self.num_heads // 2, C // self.num_heads).permute(0, 2, 1, 3)  # [B, num_heads // 2, N, C // num_heads]
-        #     attn1 = (q @ k1.transpose(-2, -1)) * self.scale  # [B, num_heads // 2, N, C // num_heads]
-        #     attn1 = attn1.softmax(dim=-1)
-        #     attn1 = self.attn_drop(attn1)  # [2, 1, 4096, 64]
-        #     v1 = v1 + self.local_conv1(v1.transpose(1, 2).reshape(B, -1, C // 2).
-        #                                transpose(1, 2).view(B, C // 2, H // self.sr_ratio, W // self.sr_ratio)). \
-        #         view(B, C // 2, -1).view(B, self.num_heads // 2, C // self.num_heads, -1).transpose(-1,
-        #                                                                                             -2)  # v1: [2, 1, 64, 64]
-        #     x1 = (attn1 @ v1).transpose(1, 2).reshape(B, N, C // 2)  # [2, 4096, 64]
-        #     attn2 = (q @ k2.transpose(-2, -1)) * self.scale  # [2, 1, 4096, 256]
-        #     attn2 = attn2.softmax(dim=-1)
-        #     attn2 = self.attn_drop(attn2)
-        #     v2 = v2 + self.local_conv2(v2.transpose(1, 2).reshape(B, -1, C // 2).  # v2: [2, 1, 256, 32]
-        #                                transpose(1, 2).view(B, C // 2, H * 2 // self.sr_ratio, W * 2 // self.sr_ratio)). \
-        #         view(B, C // 2, -1).view(B, self.num_heads // 2, C // self.num_heads, -1).transpose(-1, -2)  # [2, 1, 256, 64]
-        #     x2 = (attn2 @ v2).transpose(1, 2).reshape(B, N, C // 2)  # [2, 4096, 64]
-        #
-        #     x = torch.cat([x1, x2], dim=-1)  # [2, 4096, 64]
+        elif self.sr_ratio == 8:
+            x_ = x.permute(0, 2, 1).reshape(B, C, H, W)  # [B, C, H, W]
+            x_1 = self.act(self.norm1(self.sr1(x_).reshape(B, C, -1).permute(0, 2, 1)))  # [B, (H // sr_ratio) * (W // sr_ratio), C]
+            x_2 = self.act(self.norm2(self.sr2(x_).reshape(B, C, -1).permute(0, 2, 1)))  # [B, (H // (sr_ratio // 2)) * (W // (sr_ratio // 2)), C]
+            kv1 = self.kv1(x_1).reshape(B, -1, 2, self.num_heads // 2, C // self.num_heads).permute(2, 0, 3, 1,
+                                                                                                    4)  # [2, B, num_heads // 2, (H // sr_ratio) * (W // sr_ratio), C // num_heads]
+            kv2 = self.kv2(x_2).reshape(B, -1, 2, self.num_heads // 2, C // self.num_heads).permute(2, 0, 3, 1,
+                                                                                                    4)  # [2, B, num_heads // 2, (H // (sr_ratio // 2)) * (W // (sr_ratio // 2)), C // num_heads]
+            k1, v1 = kv1[0], kv1[1]  # B head N C  k1: [B, 1, (H // sr_ratio) * (W // sr_ratio), C // num_heads] v1: [B, 1, (H // sr_ratio) * (W // sr_ratio), C // num_heads]
+            k2, v2 = kv2[0], kv2[1]  # k2: [2, 1, 256, 64] v1: [2, 1, 256, 64]
+            q = self.q_s(x).reshape(B, N, self.num_heads // 2, C // self.num_heads).permute(0, 2, 1, 3)  # [B, num_heads // 2, N, C // num_heads]
+            attn1 = (q @ k1.transpose(-2, -1)) * self.scale  # [B, num_heads // 2, N, C // num_heads]
+            attn1 = attn1.softmax(dim=-1)
+            attn1 = self.attn_drop(attn1)  # [2, 1, 4096, 64]
+            v1 = v1 + self.local_conv1(v1.transpose(1, 2).reshape(B, -1, C // 2).
+                                       transpose(1, 2).view(B, C // 2, H // self.sr_ratio, W // self.sr_ratio)). \
+                view(B, C // 2, -1).view(B, self.num_heads // 2, C // self.num_heads, -1).transpose(-1,
+                                                                                                    -2)  # v1: [2, 1, 64, 64]
+            x1 = (attn1 @ v1).transpose(1, 2).reshape(B, N, C // 2)  # [2, 4096, 64]
+            attn2 = (q @ k2.transpose(-2, -1)) * self.scale  # [2, 1, 4096, 256]
+            attn2 = attn2.softmax(dim=-1)
+            attn2 = self.attn_drop(attn2)
+            v2 = v2 + self.local_conv2(v2.transpose(1, 2).reshape(B, -1, C // 2).  # v2: [2, 1, 256, 32]
+                                       transpose(1, 2).view(B, C // 2, H * 2 // self.sr_ratio, W * 2 // self.sr_ratio)). \
+                view(B, C // 2, -1).view(B, self.num_heads // 2, C // self.num_heads, -1).transpose(-1, -2)  # [2, 1, 256, 64]
+            x2 = (attn2 @ v2).transpose(1, 2).reshape(B, N, C // 2)  # [2, 4096, 64]
+
+            x = torch.cat([x1, x2], dim=-1)  # [2, 4096, 64]
         else:
             kv = self.kv(x).reshape(B, -1, 2, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)  # [2, 2, 16, 64, 32]
             k, v = kv[0], kv[1]  # [2, 16, 64, 64]
@@ -647,81 +648,85 @@ class Block(nn.Module):
 
         return x
 
-class OverlapPatchEmbed(nn.Module):
-    """ Image to Patch Embedding
-    """
+if __name__ == '__main__':
+    img = torch.randn(2, 3, 256, 256)
+    model = Block(dim=96, num_patches=1024, num_heads=8)
 
-    def __init__(self, img_size=224, patch_size=7, stride=4, in_chans=3, embed_dim=768):
-        super().__init__()
-        img_size = to_2tuple(img_size)
-        patch_size = to_2tuple(patch_size)
-
-        self.img_size = img_size
-        self.patch_size = patch_size
-        self.H, self.W = img_size[0] // patch_size[0], img_size[1] // patch_size[1]
-        self.num_patches = self.H * self.W
-        self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=stride,
-                              padding=(patch_size[0] // 2, patch_size[1] // 2))
-        self.norm = nn.LayerNorm(embed_dim)
-
-        self.apply(self._init_weights)
-
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            trunc_normal_(m.weight, std=.02)
-            if isinstance(m, nn.Linear) and m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm):
-            nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)
-        elif isinstance(m, nn.Conv2d):
-            fan_out = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
-            fan_out //= m.groups
-            m.weight.data.normal_(0, math.sqrt(2.0 / fan_out))
-            if m.bias is not None:
-                m.bias.data.zero_()
-
-    def forward(self, x):
-        x = self.proj(x)
-        _, _, H, W = x.shape
-        x = x.flatten(2).transpose(1, 2)
-        x = self.norm(x)
-
-        return x, H, W
-
-class Head(nn.Module):
-    def __init__(self, num):
-        super(Head, self).__init__()
-        stem = [nn.Conv2d(3, 64, 7, 2, padding=3, bias=False), nn.BatchNorm2d(64), nn.ReLU(True)]
-        for i in range(num):
-            stem.append(nn.Conv2d(64, 64, 3, 1, padding=1, bias=False))
-            stem.append(nn.BatchNorm2d(64))
-            stem.append(nn.ReLU(True))
-        stem.append(nn.Conv2d(64, 64, kernel_size=2, stride=2))
-        self.conv = nn.Sequential(*stem)
-        self.norm = nn.LayerNorm(64)
-        self.apply(self._init_weights)
-
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            trunc_normal_(m.weight, std=.02)
-            if isinstance(m, nn.Linear) and m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm):
-            nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)
-        elif isinstance(m, nn.Conv2d):
-            fan_out = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
-            fan_out //= m.groups
-            m.weight.data.normal_(0, math.sqrt(2.0 / fan_out))
-            if m.bias is not None:
-                m.bias.data.zero_()
-    def forward(self, x):
-        x = self.conv(x)
-        _, _, H, W = x.shape
-        x = x.flatten(2).transpose(1, 2)
-        x = self.norm(x)
-        return x, H,W
+# class OverlapPatchEmbed(nn.Module):
+#     """ Image to Patch Embedding
+#     """
+#
+#     def __init__(self, img_size=224, patch_size=7, stride=4, in_chans=3, embed_dim=768):
+#         super().__init__()
+#         img_size = to_2tuple(img_size)
+#         patch_size = to_2tuple(patch_size)
+#
+#         self.img_size = img_size
+#         self.patch_size = patch_size
+#         self.H, self.W = img_size[0] // patch_size[0], img_size[1] // patch_size[1]
+#         self.num_patches = self.H * self.W
+#         self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=stride,
+#                               padding=(patch_size[0] // 2, patch_size[1] // 2))
+#         self.norm = nn.LayerNorm(embed_dim)
+#
+#         self.apply(self._init_weights)
+#
+#     def _init_weights(self, m):
+#         if isinstance(m, nn.Linear):
+#             trunc_normal_(m.weight, std=.02)
+#             if isinstance(m, nn.Linear) and m.bias is not None:
+#                 nn.init.constant_(m.bias, 0)
+#         elif isinstance(m, nn.LayerNorm):
+#             nn.init.constant_(m.bias, 0)
+#             nn.init.constant_(m.weight, 1.0)
+#         elif isinstance(m, nn.Conv2d):
+#             fan_out = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
+#             fan_out //= m.groups
+#             m.weight.data.normal_(0, math.sqrt(2.0 / fan_out))
+#             if m.bias is not None:
+#                 m.bias.data.zero_()
+#
+#     def forward(self, x):
+#         x = self.proj(x)
+#         _, _, H, W = x.shape
+#         x = x.flatten(2).transpose(1, 2)
+#         x = self.norm(x)
+#
+#         return x, H, W
+#
+# class Head(nn.Module):
+#     def __init__(self, num):
+#         super(Head, self).__init__()
+#         stem = [nn.Conv2d(3, 64, 7, 2, padding=3, bias=False), nn.BatchNorm2d(64), nn.ReLU(True)]
+#         for i in range(num):
+#             stem.append(nn.Conv2d(64, 64, 3, 1, padding=1, bias=False))
+#             stem.append(nn.BatchNorm2d(64))
+#             stem.append(nn.ReLU(True))
+#         stem.append(nn.Conv2d(64, 64, kernel_size=2, stride=2))
+#         self.conv = nn.Sequential(*stem)
+#         self.norm = nn.LayerNorm(64)
+#         self.apply(self._init_weights)
+#
+#     def _init_weights(self, m):
+#         if isinstance(m, nn.Linear):
+#             trunc_normal_(m.weight, std=.02)
+#             if isinstance(m, nn.Linear) and m.bias is not None:
+#                 nn.init.constant_(m.bias, 0)
+#         elif isinstance(m, nn.LayerNorm):
+#             nn.init.constant_(m.bias, 0)
+#             nn.init.constant_(m.weight, 1.0)
+#         elif isinstance(m, nn.Conv2d):
+#             fan_out = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
+#             fan_out //= m.groups
+#             m.weight.data.normal_(0, math.sqrt(2.0 / fan_out))
+#             if m.bias is not None:
+#                 m.bias.data.zero_()
+#     def forward(self, x):
+#         x = self.conv(x)
+#         _, _, H, W = x.shape
+#         x = x.flatten(2).transpose(1, 2)
+#         x = self.norm(x)
+#         return x, H,W
 
 # 传入tensor list
 # class MultiScaleAttention(nn.Module):
@@ -841,20 +846,19 @@ class MultiScaleAttention(nn.Module):
 
         return x
 
-if __name__ == '__main__':
-    from functools import partial
-    # img = torch.randn(2, 3, 256, 256)
-    input_list = []
-    for i in range(4):
-        img = torch.randn(2, 128*(int)(math.pow(2, i)), 128//(int)(math.pow(2, i)), 128//(int)(math.pow(2, i)))
-        input_list.append(img)
-    # tensor_test = torch.randn(2, 64*(int)(math.pow(2, i)), 64//(int)(math.pow(2, i)), 64//(int)(math.pow(2, i)))
-    tensor_test = torch.randn(2, 128, 64, 64)
-    # print(input_list[1].shape)
-    model = MultiScaleAttention(patch_size=4, embed_dims=[128, 256, 512, 1024], num_heads=[2, 4, 8, 16], mlp_ratios=[8, 8, 4, 4], qkv_bias=True,
-        norm_layer=partial(nn.LayerNorm, eps=1e-6), depths=[3, 4, 24, 2], sr_ratios=[8, 4, 2, 1], num_conv=2,
-        )
-    # print(model(tensor_test).shape)
+# if __name__ == '__main__':
+#     from functools import partial
+#     # img = torch.randn(2, 3, 256, 256)
+#     input_list = []
+#     for i in range(4):
+#         img = torch.randn(2, 128*(int)(math.pow(2, i)), 128//(int)(math.pow(2, i)), 128//(int)(math.pow(2, i)))
+#         input_list.append(img)
+#     # tensor_test = torch.randn(2, 64*(int)(math.pow(2, i)), 64//(int)(math.pow(2, i)), 64//(int)(math.pow(2, i)))
+#     tensor_test = torch.randn(2, 128, 64, 64)
+#     # print(input_list[1].shape)
+#     model = MultiScaleAttention(patch_size=4, embed_dims=[128, 256, 512, 1024], num_heads=[2, 4, 8, 16], mlp_ratios=[8, 8, 4, 4], qkv_bias=True,
+#                                 norm_layer=partial(nn.LayerNorm, eps=1e-6), depths=[3, 4, 24, 2], sr_ratios=[8, 4, 2, 1])
+#     print(model(tensor_test).shape)
 
     # from  thop import profile
     # Flops, params = profile(model, inputs=(tensor_test,)) # macs
@@ -887,31 +891,31 @@ if __name__ == '__main__':
     # flops, params = profile(model, (tensor_test,))
     # print('flops: %.2f M, params: %.2f M' % (flops / 1e6, params / 1e6))
 
-    import numpy as np
-
-    starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
-    repetitions = 300
-    timings = np.zeros((repetitions, 1))
-    # GPU-WARM-UP
-    for _ in range(10):
-        _ = model(tensor_test)
-    # MEASURE PERFORMANCE
-    with torch.no_grad():
-        for rep in range(repetitions):
-            starter.record()
-            _ = model(tensor_test)
-            ender.record()
-            # WAIT FOR GPU SYNC
-            torch.cuda.synchronize()
-            curr_time = starter.elapsed_time(ender)
-            timings[rep] = curr_time
-    mean_syn = np.sum(timings) / repetitions
-    std_syn = np.std(timings)
-    mean_fps = 1000. / mean_syn
-    print(' * Mean@1 {mean_syn:.3f}ms Std@5 {std_syn:.3f}ms FPS@1 {mean_fps:.2f}'.format(mean_syn=mean_syn,
-                                                                                         std_syn=std_syn,
-                                                                                         mean_fps=mean_fps))
-    print(mean_syn)
+    # import numpy as np
+    #
+    # starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
+    # repetitions = 300
+    # timings = np.zeros((repetitions, 1))
+    # # GPU-WARM-UP
+    # for _ in range(10):
+    #     _ = model(tensor_test)
+    # # MEASURE PERFORMANCE
+    # with torch.no_grad():
+    #     for rep in range(repetitions):
+    #         starter.record()
+    #         _ = model(tensor_test)
+    #         ender.record()
+    #         # WAIT FOR GPU SYNC
+    #         torch.cuda.synchronize()
+    #         curr_time = starter.elapsed_time(ender)
+    #         timings[rep] = curr_time
+    # mean_syn = np.sum(timings) / repetitions
+    # std_syn = np.std(timings)
+    # mean_fps = 1000. / mean_syn
+    # print(' * Mean@1 {mean_syn:.3f}ms Std@5 {std_syn:.3f}ms FPS@1 {mean_fps:.2f}'.format(mean_syn=mean_syn,
+    #                                                                                      std_syn=std_syn,
+    #                                                                                      mean_fps=mean_fps))
+    # print(mean_syn)
 
 
 
