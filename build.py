@@ -8,6 +8,9 @@ from models.RegularLandSCDV1 import RegularLandSCDV1
 from models.RegularLandSCDV2 import RegularLandSCDV2
 from models.SwinTransformerV2UperNetSeg import SwinTransformerUperNet
 from models.SwinTransformerV2UperNetSegV1 import SwinTransformerUperNetBase
+from models.SwinTransformerV2UperNetSegV2 import SwinTransformerUperNetV2
+from models.SwinTransformerV2UperNetSegV4 import SwinTransformerUperNetV4
+# from models.SwinTransformerV2UperNetSegV3 import SwinTransformerUperNetV3
 
 class Builder(object):
     def __init__(self, args) -> None:
@@ -20,7 +23,10 @@ class Builder(object):
             'RegularLandSCDV2': RegularLandSCDV2,
             'SwinTransformerUperNet': SwinTransformerUperNet,
             'ISwinUperNetV5': ISwinUperNetV5, #partial(ISwinUperNetV5, layer_name='tiny')
-            'SwinTransformerUperNetBase':SwinTransformerUperNetBase
+            'SwinTransformerUperNetBase':SwinTransformerUperNetBase,
+            'SwinTransformerUperNetV2': SwinTransformerUperNetV2,
+            'SwinTransformerUperNetV4': SwinTransformerUperNetV4,
+            # 'SwinTransformerUperNetV3': SwinTransformerUperNetV3
         }
 
     def build_model(self):
@@ -30,10 +36,13 @@ class Builder(object):
         model = self.models[self.args.train_model]
         if model in (BiSRNet, ):
             return model(num_classes=self.args.n_class)
-        elif model in (RegularLandSCDV1, RegularLandSCDV2, ISwinUperNetV5, SwinTransformerUperNetBase):
+        elif model in (RegularLandSCDV1, RegularLandSCDV2, ISwinUperNetV5, SwinTransformerUperNetBase,
+                       SwinTransformerUperNetV2, SwinTransformerUperNetV4):
             return model(pretrain_img_size=self.args.img_size, num_classes=self.args.n_class, in_chans=self.args.num_channel)
         elif model in (SwinTransformerUperNet, ):
             return model()
+        # elif model in (SwinTransformerUperNetV3,):
+        #     return model(pretrain_img_size=self.args.img_size, num_classes=self.args.n_class, in_chans=self.args.num_channel, num_expert=self.args.num_expert)
         else:
             return model(num_classes=self.args.n_class,
                          backbone=self.args.backbone,

@@ -318,9 +318,9 @@ class ChannelMultiAttention(nn.Module):
 
         return out
 
-class DualMultiAttentionBlock(nn.Module):
+class ChannelMultiAttentionBlock(nn.Module):
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
-                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, sr_ratio=1, is_change=False):
+                 drop_path=0.05, act_layer=nn.GELU, norm_layer=nn.LayerNorm, sr_ratio=1, is_change=False):
         super().__init__()
 
         self.mlp2 = Mlp(in_features=dim * 2, hidden_features=dim * 2, out_features=dim, act_layer=act_layer, drop=drop)
@@ -328,10 +328,10 @@ class DualMultiAttentionBlock(nn.Module):
 
         self.norm1 = norm_layer(dim)
         self.sr_ratio = sr_ratio
-        self.attn_spatial = SpatialMultiAttention(
-            dim,
-            num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale,
-            attn_drop=attn_drop, proj_drop=drop, sr_ratio=sr_ratio)
+        # self.attn_spatial = SpatialMultiAttention(
+        #     dim,
+        #     num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale,
+        #     attn_drop=attn_drop, proj_drop=drop, sr_ratio=sr_ratio)
         self.attn_channel = ChannelMultiAttention(dim, dim, conv_groups=[1, 3, 6, 12])
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
@@ -360,22 +360,26 @@ class DualMultiAttentionBlock(nn.Module):
 
     def forward(self, x, H, W):
         # x = torch.concat([x, y], dim=1)
+        C = x.shape[1]
         if self.isChange:
-            x = self.drop_path(self.mlp2(self.norm3(x), H, W))
+            x = self.drop_path(self.mlp2(self.norm3(x.view(-1, H*W, C)), H, W))
+            x = x.view(-1, int(C / 2) ,H, W)#.view(-1, x.size(1), x.size(2), x.size(3))
 
-        x_spatial = x + self.drop_path(self.attn_spatial(self.norm1(x), H, W))  # [2, 64, 512]   [2, 4096, 64]
-        x_spatial = x + self.drop_path(self.mlp(self.norm2(x_spatial), H, W))   # [2, 64, 512] [2, 4096, 64] [2, 1024, 128] [2, 256, 256]
-        x_channel = self.drop_path(self.attn_channel(x.view(-1, x.shape[2], H, W)).view(-1, H * W, x.shape[2])) + x
-        x_channel = self.drop_path(self.mlp(self.norm2(x_channel), H, W)) + x
+        # x_spatial = x + self.drop_path(self.attn_spatial(self.norm1(x), H, W))  # [2, 64, 512]   [2, 4096, 64]
+        # x_spatial = x + self.drop_path(self.mlp(self.norm2(x_spatial), H, W))   # [2, 64, 512] [2, 4096, 64] [2, 1024, 128] [2, 256, 256]
+        # x_channel = self.drop_path(self.attn_channel(x.view(-1, x.shape[2], H, W)).view(-1, H * W, x.shape[2])) + x
+        x_channel = self.drop_path(self.attn_channel(x)) + x
+        # x_channel = self.drop_path(self.mlp(self.norm2(x_channel), H, W)) + x
 
         # if self.isChange:
         #     return self.drop_path(self.mlp2(self.norm3(x_spatial), H, W)) + self.drop_path(self.mlp2(self.norm3(x_channel), H, W))
 
-        return x_spatial + x_channel
+        # return x_spatial + x_channel
+        return x_channel
 
 if __name__ == '__main__':
     img = torch.randn(2, 4096, 128)
-    model = DualMultiAttentionBlock(dim=128, num_heads=8)
+    model = ChannelMultiAttentionBlock(dim=128, num_heads=8)
     print(model(img, 64, 64).shape)
 
 # if __name__ == '__main__':

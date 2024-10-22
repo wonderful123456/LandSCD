@@ -17,6 +17,7 @@ import os
 # from misc.logger_tool import *
 # import torch.optim as optim
 from trainer import CDTrainer
+# from trainerMultiExpert import CDTrainer
 # import utils
 
 def get_device(args):
@@ -37,9 +38,9 @@ def train(args):
 
     # train_sets = torch.utils.data.ConcatDataset([train_sets, train_sets_aug])
     # train_sets = torch.utils.data.ConcatDataset([train_sets, train_sets_aug_aug])
-    val_sets = CDDataset(split='val')
-    # val_sets_aug = Sentinel(split='val')
-    # # val_sets_aug_aug = Sentinel(split='val')
+    val_sets = CDDataset(split='val', is_train=False)
+    # val_sets_aug = CDDataset(split='val')
+    # val_sets_aug_aug = Sentinel(split='val')
     # val_sets = torch.utils.data.ConcatDataset([val_sets, val_sets_aug])
     # val_sets = torch.utils.data.ConcatDataset([val_sets, val_sets_aug_aug])
     datasets = {'train': train_sets, 'val': val_sets}
@@ -52,7 +53,8 @@ def train(args):
 def test(args):
     # from models.evaluator import CDEvaluator
     from evaluator import CDEvaluator
-    test_sets = CDDataset(split='test')
+    test_sets = CDDataset(split='test', is_train=False)
+    file_list1 = test_sets.img_name_list
     # test_sets_aug = Sentinel(split='test')
     dataloader = DataLoader(test_sets, batch_size=args.batch_size,
                                  shuffle=False, num_workers=4)
@@ -61,7 +63,7 @@ def test(args):
     #                               batch_size=args.batch_size, is_train=False,
     #                               split='test')
 
-    model = CDEvaluator(args=args, dataloader=dataloader)
+    model = CDEvaluator(args=args, dataloader=dataloader, fire_list = file_list1)
 
     model.eval_models()
 
@@ -91,8 +93,8 @@ if __name__ == "__main__":
     # ------------
     parser = ArgumentParser()
     parser.add_argument('--gpu_ids', type=str, default='0,1', help='gpu ids: e.g. 0  0,1,2, 0,2. use -1 for CPU')
-    parser.add_argument('--train_model', default='SwinTransformerUperNetBase', type=str)
-    parser.add_argument('--project_name', default='SwinTransformerUperNetBase_T1', type=str)
+    parser.add_argument('--train_model', default='SwinTransformerUperNetV4', type=str)
+    parser.add_argument('--project_name', default='SwinTransformerUperNetV4_T6', type=str)
     parser.add_argument('--checkpoint_root', default='checkpoints/', type=str)
 
     # data
@@ -116,13 +118,13 @@ if __name__ == "__main__":
                              'base_transformer_pos_s4_dd8 | '
                              'base_transformer_pos_s4_dd8_dedim8|')
     parser.add_argument('--loss', default='ce', type=str)
-    parser.add_argument('--num_expert', default=1, type=int)
+    parser.add_argument('--num_expert', default=3, type=int)
 
     # optimizer
     parser.add_argument('--doptimizer', default='adam', type=str)
-    parser.add_argument('--lr', default=5e-4, type=float)
+    parser.add_argument('--lr', default=3e-4, type=float)
     parser.add_argument('--max_epochs', default=300, type=int)
-    parser.add_argument('--lr_policy', default='poly', type=str,
+    parser.add_argument('--lr_policy', default='CosineAnnealing', type=str,
                         help='linear | step')
     parser.add_argument('--lr_decay_iters', default=30, type=int)
 

@@ -84,11 +84,11 @@ class SwinTransformerUperNetBase(nn.Module):
 
         self.backbone = SwinTransformerV2(
             img_size=pretrain_img_size, patch_size=patch_size, in_chans=in_chans, num_classes=num_classes,
-            embed_dim=embed_dim, depths=depths, num_heads=num_heads, window_size=8
+            embed_dim=embed_dim, depths=depths, num_heads=num_heads, window_size=8, drop_rate=0.1
         )
         self.backbone2 = SwinTransformerV2(
             img_size=pretrain_img_size, patch_size=patch_size, in_chans=in_chans, num_classes=num_classes,
-            embed_dim=embed_dim, depths=depths, num_heads=num_heads, window_size=8
+            embed_dim=embed_dim, depths=depths, num_heads=num_heads, window_size=8, drop_rate=0.1
         )
         self.embed_dim = embed_dim
 

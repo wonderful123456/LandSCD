@@ -1,6 +1,9 @@
+from sched import scheduler
+
 import numpy as np
 import matplotlib.pyplot as plt
 import os
+from timm.scheduler.cosine_lr import CosineLRScheduler
 
 import torch.nn as nn
 
@@ -19,6 +22,8 @@ from misc.logger_tool import Logger, Timer
 from models.danet import get_danet
 from torch.optim import lr_scheduler
 
+import itertools
+
 from build import Builder
 
 def get_scheduler(optimizer, args):
@@ -34,6 +39,10 @@ def get_scheduler(optimizer, args):
     For other schedulers (step, plateau, and cosine), we use the default PyTorch schedulers.
     See https://pytorch.org/docs/stable/optim.html for more details.
     """
+    num_steps = int(300 * 1302)  # 1302 = 651 * 8(batch_size) / n_iter_per_epoch(4)
+    warmup_steps = int(20 * 1302)
+    # decay_steps = int(30 * 1302)
+    # multi_steps = [i * 1302 for i in []]
     if args.lr_policy == 'linear':
         def lambda_rule(epoch):
             lr_l = 1.0 - epoch / float(args.max_epochs + 1)
@@ -44,7 +53,19 @@ def get_scheduler(optimizer, args):
         # args.lr_decay_iters
         scheduler = lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=0.1)
     elif args.lr_policy == 'CosineAnnealing':
-        scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=80, eta_min=1e-6, last_epoch=-1, verbose=False)
+        # scheduler = WarmupCosineAnnealingLR(optimizer, warmup_epochs=30, T_max=150)
+        # scheduler = CosineLRScheduler(
+        #     optimizer,
+        #     t_initial=(num_steps - warmup_steps) if True else num_steps,
+        #     # t_mul=1.,
+        #     lr_min=5e-6,
+        #     warmup_lr_init=5e-7,
+        #     warmup_t=warmup_steps,
+        #     cycle_limit=1,
+        #     t_in_epochs=False,
+        #     warmup_prefix=True,
+        # )
+        scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=150, eta_min=1e-6, last_epoch=-1, verbose=False)
     elif args.lr_policy == 'poly':
         scheduler = lr_scheduler.PolynomialLR(optimizer, power=0.9, total_iters=300, last_epoch=-1, verbose=False)
     elif args.lr_policy == 'ReduceLRO':
@@ -96,8 +117,8 @@ class SegmentationLosses(object):
         # print('logit shape is ', logit.shape)  # [2, 6, 3, 7, 7]
         # print('target shape is ', target.long().shape)  # [2, 6, 7, 7]
 
-        logit = logit.permute(0,2,3,4,1)
-        target = target.permute(0,2,3,1)
+        # logit = logit.permute(0,2,3,4,1)
+        # target = target.permute(0,2,3,1)
         # print('logit shape is ', logit.shape)
         # print('target shape is ', target.long().shape)
 
@@ -146,6 +167,48 @@ class BondaryLoss(nn.Module):
 
         return loss
 
+# add  by ljc
+class WarmupCosineAnnealingLR(torch.optim.lr_scheduler._LRScheduler):
+    def __init__(self, optimizer, warmup_epochs, T_max, eta_min=0, last_epoch=-1):
+        self.warmup_epochs = warmup_epochs
+        self.T_max = T_max
+        self.eta_min = eta_min
+        super(WarmupCosineAnnealingLR, self).__init__(optimizer, last_epoch)
+
+    def get_lr(self):
+        if self.last_epoch < self.warmup_epochs:
+            return [base_lr * (self.last_epoch + 1) / self.warmup_epochs for base_lr in self.base_lrs]
+        else:
+            cos_inner = np.pi * (self.last_epoch - self.warmup_epochs) / (self.T_max - self.warmup_epochs)
+            cos_lr = self.eta_min + (1 + np.cos(cos_inner)) / 2 * (self.base_lrs[0] - self.eta_min)
+            return [cos_lr for _ in self.base_lrs]
+
+
+class DiceLoss(nn.Module):
+    """
+    soft dice loss, 直接使用预测概率而不是使用阈值或将它们转换为二进制mask
+    """
+
+    def __init__(self, epsilon=1e-5):
+        super(DiceLoss, self).__init__()
+        self.epsilon = epsilon
+
+    def forward(self, predict, target):
+        assert predict.size() == target.size(), "the size of predict and target must be equal."
+        num = predict.size(0)
+
+        # pred不需要转bool变量，如https://github.com/yassouali/pytorch-segmentation/blob/master/utils/losses.py#L44
+        # soft dice loss, 直接使用预测概率而不是使用阈值或将它们转换为二进制mask
+        pred = torch.sigmoid(predict).view(num, -1)
+        targ = target.view(num, -1)
+
+        intersection = (pred * targ).sum()  # 利用预测值与标签相乘当作交集
+        union = (pred + targ).sum()
+
+        score = 1 - 2 * (intersection + self.epsilon) / (union + self.epsilon)
+
+        return score
+
 class CDTrainer():
 
     def __init__(self, args, dataloaders):  # 初始化参数
@@ -159,6 +222,18 @@ class CDTrainer():
                                    else "cpu")
         print(self.device)
 
+        # self.log_sigma_d_a = nn.Parameter(torch.tensor(0.0, requires_grad=True))
+        # self.log_sigma_f_a = nn.Parameter(torch.tensor(0.0, requires_grad=True))
+        #
+        # self.log_sigma_d_b = nn.Parameter(torch.tensor(0.0, requires_grad=True))
+        # self.log_sigma_f_b = nn.Parameter(torch.tensor(0.0, requires_grad=True))
+        #
+        # self.log_sigma_d_ch = nn.Parameter(torch.tensor(0.0, requires_grad=True))
+        # self.log_sigma_f_ch = nn.Parameter(torch.tensor(0.0, requires_grad=True))
+
+        # self.aggregation_weight = torch.nn.Parameter(torch.FloatTensor(args.num_expert), requires_grad=True)
+        # self.aggregation_weight.data.fill_(1/args.num_expert)
+
         # Learning rate and Beta1 for Adam optimizers
         self.lr = args.lr
 
@@ -166,8 +241,14 @@ class CDTrainer():
         # self.optimizer_G = optim.SGD(self.net_G.to(self.device).parameters(), lr=self.lr,
         #                              momentum=0.9,
         #                              weight_decay=5e-4)
-        self.optimizer_G = optim.Adam(self.net_G.to(self.device).parameters(), lr=self.lr, betas=(0.9, 0.999))
-
+        # self.optimizer_G = optim.Adam(self.net_G.to(self.device).parameters(), lr=self.lr, betas=(0.9, 0.999))
+        self.optimizer_G = optim.AdamW(self.net_G.to(self.device).parameters(), eps=1e-8, betas=(0.9, 0.999),
+                    lr=self.lr, weight_decay=0.05)
+        # self.itertools = self.optimizer_G = optim.Adam(itertools.chain(self.net_G.to(self.device).parameters(),
+        #                                       [self.log_sigma_d_a, self.log_sigma_f_a],
+        #                                       [self.log_sigma_d_b, self.log_sigma_f_b],
+        #                                       [self.log_sigma_d_ch, self.log_sigma_f_ch]),
+        #                       lr=self.lr, betas=(0.9, 0.999))
         # define lr schedulers
         self.exp_lr_scheduler_G = get_scheduler(self.optimizer_G, args)
         self.running_metric = ConfuseMatrixMeter(n_class=self.n_class)      # A 时相
@@ -214,6 +295,7 @@ class CDTrainer():
         # define the loss functions
         if args.loss == 'ce':
             self._pxl_loss = SegmentationLosses()
+            self._pxl_loss_2 = DiceLoss()
             # self._pxl_loss = FocalLoss
         elif args.loss == 'bce':
             self._pxl_loss = losses.binary_ce
@@ -288,8 +370,8 @@ class CDTrainer():
             'exp_lr_scheduler_G_state_dict': self.exp_lr_scheduler_G.state_dict(),
         }, os.path.join(self.checkpoint_dir, ckpt_name))
 
-    def _update_lr_schedulers(self):
-        self.exp_lr_scheduler_G.step()
+    def _update_lr_schedulers(self, epoch):
+        self.exp_lr_scheduler_G.step(epoch)
 
     def _update_metric(self):
         """
@@ -335,7 +417,7 @@ class CDTrainer():
                      self.G_loss.item(), self.G_loss_B.item(), self.G_loss_CH.item(), running_acc)
             self.logger.write(message)
 
-    def _collect_epoch_states(self, epoch):
+    def _collect_epoch_states(self):
         scores = self.running_metric.get_scores()
         scores_B = self.running_metric_B.get_scores()
         scores_CH = self.running_metric_change.get_scores()
@@ -397,22 +479,51 @@ class CDTrainer():
 
     def _backward_G(self):
 
+        epsilon = 1e-6
         # A Seg
         gt = self.batch[1].to(self.device).long()
-        self.G_loss = self._pxl_loss.CrossEntropyLoss(self.G_pred, gt.squeeze(dim=1))
-        # self.G_loss = self.G_loss #+ self.G_bdloss
+        self.G_loss = self._pxl_loss.FocalLoss(self.G_pred, gt.squeeze(dim=1))
+        # self.G_loss = self._pxl_loss_2(self.G_pred.argmax(dim=1), gt.squeeze(dim=1))
+        # sigma_d_a = torch.exp(self.log_sigma_d_b) + epsilon
+        # sigma_f_a = torch.exp(self.log_sigma_f_b) + epsilon
+        # self.G_loss = ((1 / (2 * sigma_f_a **2)) * self.G_loss +
+        #                (1 / (2 * sigma_d_a **2)) * self.G_loss_2) #+ torch.log(sigma_d_a) + torch.log(sigma_f_a)
+        # self.G_loss = self.G_loss_2 #+ self.G_bdloss
         # self.G_loss.backward(retain_graph=False)
 
         # B Seg
         gt_B = self.batch[3].to(self.device).long()
-        self.G_loss_B = self._pxl_loss.CrossEntropyLoss(self.G_pred_B, gt_B.squeeze(dim=1))
+        self.G_loss_B = self._pxl_loss.FocalLoss(self.G_pred_B, gt_B.squeeze(dim=1))
+        # self.G_loss_B = self._pxl_loss_2(self.G_pred_B.argmax(dim=1), gt_B.squeeze(dim=1))
+        # self.G_loss_B = self.G_loss_B_2
+        # sigma_d_b = torch.exp(self.log_sigma_d_b) + epsilon
+        # sigma_f_b = torch.exp(self.log_sigma_f_b) + epsilon
+        # self.G_loss_B = ((1 / (2 * sigma_f_b **2)) * self.G_loss +
+        #                (1 / (2 * sigma_d_b **2)) * self.G_loss_2) #+ torch.log(sigma_d_b) + torch.log(sigma_f_b)
         # self.G_loss_B.backward(retain_graph=False)
 
         # Change
         gt_CH = self.batch[4].to(self.device).long()
-        self.G_loss_CH = self._pxl_loss.CrossEntropyLoss(self.G_pred_CH, gt_CH.squeeze(dim=1))
+        self.G_loss_CH = self._pxl_loss.FocalLoss(self.G_pred_CH, gt_CH.squeeze(dim=1))
+        # self.G_loss_CH = self._pxl_loss_2(self.G_pred_CH.argmax(dim=1), gt_CH.squeeze(dim=1))
+        # self.G_loss_CH = self.G_loss_CH_2
+        # self.G_loss_CH = self.G_loss_CH + self.G_loss_CH_2
+        # sigma_d_ch = torch.exp(self.log_sigma_d_ch) + epsilon
+        # sigma_f_ch = torch.exp(self.log_sigma_f_ch) + epsilon
+        # self.G_loss_CH = ((1 / (2 * sigma_f_ch **2)) * self.G_loss +
+        #                (1 / (2 * sigma_d_ch **2)) * self.G_loss_2) #+ torch.log(sigma_d_ch) + torch.log(sigma_f_ch)
+        # 打印梯度属性
+
         self.G_loss_total = self.G_loss_CH + self.G_loss + self.G_loss_B
+
+        # print(f"self.G_loss.requires_grad: {self.G_loss.requires_grad}")
+        # print(f"self.G_loss_B.requires_grad: {self.G_loss_B.requires_grad}")
+        # print(f"self.G_loss_CH.requires_grad: {self.G_loss_CH.requires_grad}")
+        # print(f"self.G_loss_total.requires_grad: {self.G_loss_total.requires_grad}")
         self.G_loss_total.backward()
+
+        # 这里添加梯度裁剪
+        # torch.nn.utils.clip_grad_norm_(self.net_G.parameters(), max_norm=5.0)
 
     def train_models(self):
 
@@ -428,18 +539,23 @@ class CDTrainer():
             self.net_G.train()  # Set model to training mode
             # Iterate over data.
             self.logger.write('lr: %0.7f\n' % self.optimizer_G.param_groups[0]['lr'])
+            accumulation_steps = 4
             for self.batch_id, batch in enumerate(self.dataloaders['train'], 0):
                 self._forward_pass(batch)
                 # update G
-                self.optimizer_G.zero_grad()
+                # self.optimizer_G.zero_grad()
                 self._backward_G()
-                self.optimizer_G.step()
+                # self.optimizer_G.step()
                 self._collect_running_batch_states()
                 self._timer_update()
+                # 梯度累积 模拟 accumulation_steps * batch_size的批量大小
+                if (self.batch_id + 1) % accumulation_steps == 0:
+                    self.optimizer_G.step()
+                    self.optimizer_G.zero_grad()
 
-            self._collect_epoch_states(epoch=self.epoch_id)
+            self._collect_epoch_states()
             self._update_training_acc_curve()
-            self._update_lr_schedulers()
+            self._update_lr_schedulers(self.epoch_id)
 
             ################## Eval ##################
             ##########################################
@@ -453,10 +569,11 @@ class CDTrainer():
                 with torch.no_grad():
                     self._forward_pass(batch)
                 self._collect_running_batch_states()
-            self._collect_epoch_states(epoch=self.epoch_id)
+            self._collect_epoch_states()
 
             ########### Update_Checkpoints ###########
             ##########################################
             # if self.epoch_id % 5 == 0:      # 每5代保存一次結果,由ljc修改
             self._update_val_acc_curve()
             self._update_checkpoints()
+

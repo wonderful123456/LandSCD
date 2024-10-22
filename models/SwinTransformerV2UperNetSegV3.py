@@ -2,7 +2,7 @@ import math
 
 from models.backbone.swin_transformer_v2 import SwinTransformerV2
 from models.sseg.uperhead import UperNetHead
-from models.modules.Attention import DualMultiAttentionBlock
+from models.modules.Attention import ChannelMultiAttentionBlock
 
 import torch
 import torch.nn as nn
@@ -60,7 +60,7 @@ def conv1x1(in_planes, out_planes, stride=1):
 # base model
 class SwinTransformerUperNetV3(nn.Module):
     def __init__(self, pretrain_img_size=256, embed_dim=96, num_classes=6, in_chans=3, patch_size=8, depths=[2, 2, 6, 2],
-                 num_heads=[3, 6, 12, 24]):
+                 num_heads=[3, 6, 12, 24], num_stages=4, num_expert=1):
         super().__init__()
         self.num_layers = len(depths)
         num_features = [int(embed_dim * 2 ** i) for i in range(self.num_layers)]
@@ -75,17 +75,35 @@ class SwinTransformerUperNetV3(nn.Module):
         #     embed_dim=embed_dim, depths=depths, num_heads=num_heads, window_size=8
         # )
         self.embed_dim = embed_dim
+        self.num_expert = num_expert
 
         self.num_heads = [1, 2, 4, 8]
 
         # self.fuse_module = nn.ModuleList(CatMerging(num_features[i], num_features[i]) for i in range(self.num_layers))
-        self.fuse_module = nn.ModuleList([DualMultiAttentionBlock(num_features[i], self.num_heads[i], is_change=True) for i in range(self.num_layers)])
+        self.fuse_module = nn.ModuleList([ChannelMultiAttentionBlock(num_features[i], self.num_heads[i], is_change=True) for i in range(self.num_layers)])
 
-        self.depth = [2, 2, 6, 2]
+        self.depth = [1, 1, 1, 1]
         self.depthCH = [2, 2, 4, 2]
 
-        self.segA_encoder = nn.ModuleList([DualMultiAttentionBlock(num_features[i], self.num_heads[i]) for i in range(self.num_layers)])
-        self.segB_encoder = nn.ModuleList([DualMultiAttentionBlock(num_features[i], self.num_heads[i]) for i in range(self.num_layers)])
+        # self.segA_encoder_blocks = []
+        # self.segB_encoder_blocks = []
+
+        self.num_stages = num_stages
+
+        for num in range(self.num_expert):
+            for i in range(self.num_stages):
+                self.segA_encoder_block = nn.ModuleList(
+                    [ChannelMultiAttentionBlock(num_features[i], self.num_heads[i]) for j in range(self.depth[i])])
+                self.segB_encoder_block = nn.ModuleList(
+                    [ChannelMultiAttentionBlock(num_features[i], self.num_heads[i]) for j in range(self.depth[i])])
+
+                setattr(self, f"SegA_block{i + 1}", self.segA_encoder_block)
+                setattr(self, f"SegB_block{i + 1}", self.segB_encoder_block)
+
+            # self.segA_encoder_blocks.append(self.segA_encoder)
+            # self.segB_encoder_blocks.append(self.segB_encoder)
+        # self.segA_encoder = nn.ModuleList([DualMultiAttentionBlock(num_features[i], self.num_heads[i]) for i in range(self.num_layers)])
+        # self.segB_encoder = nn.ModuleList([DualMultiAttentionBlock(num_features[i], self.num_heads[i]) for i in range(self.num_layers)])
 
         self.a_seg_decode_head = UperNetHead(
             in_channels=[self.embed_dim, self.embed_dim * 2, self.embed_dim * 4, self.embed_dim * 8],
@@ -120,55 +138,59 @@ class SwinTransformerUperNetV3(nn.Module):
 
         return nn.Sequential(*layers)
 
-    def CD_forward(self, x1, x2):
-        b,c,h,w = x1.size()
-        x = torch.cat([x1,x2], 1)
-        x = self.res1(x)
-        change = self.CD(x)
-        return change
-
     def forward(self, x1, x2):
         H, W = x1.shape[2], x1.shape[3]
         x1, x1_list = self.backbone.forward_intermediates(x1)  # 共享权重
         x2, x2_list = self.backbone.forward_intermediates(x2)
 
-        for i in range(4):  # 假设有4层
-            x1_layer = x1_list[i].view(-1, x1_list[i].shape[2] ** 2, self.embed_dim * 2 ** i)
-            x2_layer = x2_list[i].view(-1, x2_list[i].shape[2] ** 2, self.embed_dim * 2 ** i)
-            for j in range(self.depth[i]):  # 遍历当前层的深度
-                processed = self.segA_encoder[i](x1_layer, x1_list[i].shape[2], x1_list[i].shape[2])
-                x1_list[i] = processed.view(-1, self.embed_dim * 2 ** i, x1_list[i].shape[2], x1_list[i].shape[3])
-                processed2 = self.segB_encoder[i](x2_layer, x2_list[i].shape[2], x2_list[i].shape[2])
-                x2_list[i] = processed2.view(-1, self.embed_dim * 2 ** i, x2_list[i].shape[2], x2_list[i].shape[3])
+        outsA = []
+        outsB = []
 
-        # x1_list = [self.segA_encoder[i](x1_list[i].view(-1, x1_list[i].shape[2] ** 2 ,self.embed_dim * 2 ** i),
-        #                                 x1_list[i].shape[2], x1_list[i].shape[2]).view(-1, self.embed_dim * 2 ** i, x1_list[i].shape[2], x1_list[i].shape[3]) for i in range(4)]
-        # x2_list = [self.segB_encoder[i](x2_list[i].view(-1, x2_list[i].shape[2] ** 2 ,self.embed_dim * 2 ** i),
-        #                                 x2_list[i].shape[2], x2_list[i].shape[2]).view(-1, self.embed_dim * 2 ** i, x2_list[i].shape[2], x2_list[i].shape[3]) for i in range(4)]
+        for t in range(self.num_expert):
+            for i in range(self.num_stages):  # 假设有4层
+                x1_layer = x1_list[i].view(-1, x1_list[i].shape[2] ** 2, self.embed_dim * 2 ** i)
+                x2_layer = x2_list[i].view(-1, x2_list[i].shape[2] ** 2, self.embed_dim * 2 ** i)
 
-        x1_seg = self.a_seg_decode_head(x1_list)
-        x2_seg = self.b_seg_decode_head(x2_list)
-        # change = self.CD_forward(x1.transpose(1, 3).transpose(2, 3), x2.transpose(1, 3).transpose(2, 3))
-        change = [self.fuse_module[i](
-            torch.cat((x1_list[i].view(-1, x1_list[i].shape[2] ** 2 ,self.embed_dim * 2 ** i),
-                      x2_list[i].view(-1, x1_list[i].shape[2] ** 2 ,self.embed_dim * 2 ** i)), dim=-1), x1_list[i].shape[2], x1_list[i].shape[2])
-                  .view(-1, self.embed_dim * 2 ** i, x1_list[i].shape[2], x1_list[i].shape[3])  for i in range(4)]
-        change = self.change_decode_head(change)
+                block_A = getattr(self, f"SegA_block{i + 1}")
+                block_B = getattr(self, f"SegB_block{i + 1}")
+                for blk in block_A:  # 遍历当前层的深度
+                    processed = blk(x1_layer, x1_list[i].shape[2], x1_list[i].shape[2])
+                    x1_list[i] = processed.view(-1, self.embed_dim * 2 ** i, x1_list[i].shape[2], x1_list[i].shape[3])
+                for blk in block_B:
+                    processed2 = blk(x2_layer, x2_list[i].shape[2], x2_list[i].shape[2])
+                    x2_list[i] = processed2.view(-1, self.embed_dim * 2 ** i, x2_list[i].shape[2], x2_list[i].shape[3])
+
+            # x1_list = [self.segA_encoder[i](x1_list[i].view(-1, x1_list[i].shape[2] ** 2 ,self.embed_dim * 2 ** i),
+            #                                 x1_list[i].shape[2], x1_list[i].shape[2]).view(-1, self.embed_dim * 2 ** i, x1_list[i].shape[2], x1_list[i].shape[3]) for i in range(4)]
+            # x2_list = [self.segB_encoder[i](x2_list[i].view(-1, x2_list[i].shape[2] ** 2 ,self.embed_dim * 2 ** i),
+            #                                 x2_list[i].shape[2], x2_list[i].shape[2]).view(-1, self.embed_dim * 2 ** i, x2_list[i].shape[2], x2_list[i].shape[3]) for i in range(4)]
+
+            x1_seg = self.a_seg_decode_head(x1_list)
+            x2_seg = self.b_seg_decode_head(x2_list)
+            # change = self.CD_forward(x1.transpose(1, 3).transpose(2, 3), x2.transpose(1, 3).transpose(2, 3))
+            change = [self.fuse_module[i](
+                torch.cat((x1_list[i].view(-1, x1_list[i].shape[2] ** 2 ,self.embed_dim * 2 ** i),
+                          x2_list[i].view(-1, x1_list[i].shape[2] ** 2 ,self.embed_dim * 2 ** i)), dim=-1), x1_list[i].shape[2], x1_list[i].shape[2])
+                      .view(-1, self.embed_dim * 2 ** i, x1_list[i].shape[2], x1_list[i].shape[3])  for i in range(4)]
+            change = self.change_decode_head(change)
+
+            outsA.append(F.interpolate(x1_seg, (H, W), mode='bilinear', align_corners=True))
+            outsB.append(F.interpolate(x2_seg, (H, W), mode='bilinear', align_corners=True))
 
         return F.interpolate(x1_seg, (H, W), mode='bilinear', align_corners=True), F.interpolate(x2_seg, (H, W), mode='bilinear', align_corners=True), \
-                F.interpolate(change, (H, W), mode='bilinear', align_corners=True)
+                F.interpolate(change, (H, W), mode='bilinear', align_corners=True), torch.stack(outsA, dim=1), torch.stack(outsB, dim=1)
 
 if __name__ == '__main__':
     device = torch.device("cuda")
     img = torch.randn(2, 3, 256, 256).to('cuda')
     img_B = torch.randn(2, 3, 256, 256).to('cuda')
     models = SwinTransformerUperNetV3().to('cuda')
-    print(models(img, img_B)[2].shape)
+    print(models(img, img_B)[1].shape)
 
     from thop import profile
 
-    # input = torch.randn(16, 3, 256, 256).to(device)
-    # input_B = torch.randn(16, 3, 256, 256).to(device)
-    # flops, params = profile(models, inputs=(input,input_B))
-    # print('the flops is {}G,the params is {}M'.format(round(flops / (10 ** 9), 2),
-    #                                                   round(params / (10 ** 6), 2)))  # 4111514624.0 25557032.0 res50
+    input = torch.randn(16, 3, 256, 256).to(device)
+    input_B = torch.randn(16, 3, 256, 256).to(device)
+    flops, params = profile(models, inputs=(input,input_B))
+    print('the flops is {}G,the params is {}M'.format(round(flops / (10 ** 9), 2),
+                                                      round(params / (10 ** 6), 2)))  # 4111514624.0 25557032.0 res50
