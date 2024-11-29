@@ -10,6 +10,8 @@ from configs.GEPNew.parser_options import ParserOptions
 # from dataloader.Sentinel_Datasets import Sentinel
 from dataset.CD_dataset import CDDataset
 
+
+
 import torch
 from torch.utils.data import DataLoader
 import os
@@ -93,8 +95,8 @@ if __name__ == "__main__":
     # ------------
     parser = ArgumentParser()
     parser.add_argument('--gpu_ids', type=str, default='0,1', help='gpu ids: e.g. 0  0,1,2, 0,2. use -1 for CPU')
-    parser.add_argument('--train_model', default='SwinTransformerUperNetV4', type=str)
-    parser.add_argument('--project_name', default='SwinTransformerUperNetV4_T6', type=str)
+    parser.add_argument('--train_model', default='TransUNet', type=str)
+    parser.add_argument('--project_name', default='TransUNet-B_16_Finaldata_po', type=str)
     parser.add_argument('--checkpoint_root', default='checkpoints/', type=str)
 
     # data
@@ -119,12 +121,13 @@ if __name__ == "__main__":
                              'base_transformer_pos_s4_dd8_dedim8|')
     parser.add_argument('--loss', default='ce', type=str)
     parser.add_argument('--num_expert', default=3, type=int)
+    parser.add_argument('--is_pruning', default=True, type=bool)
 
     # optimizer
     parser.add_argument('--doptimizer', default='adam', type=str)
-    parser.add_argument('--lr', default=3e-4, type=float)
+    parser.add_argument('--lr', default=5e-4, type=float)#((3e-4) + (5e-5)), type=float)
     parser.add_argument('--max_epochs', default=300, type=int)
-    parser.add_argument('--lr_policy', default='CosineAnnealing', type=str,
+    parser.add_argument('--lr_policy', default='poly', type=str,
                         help='linear | step')
     parser.add_argument('--lr_decay_iters', default=30, type=int)
 

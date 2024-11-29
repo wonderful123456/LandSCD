@@ -816,8 +816,8 @@ class ISwinTransformerV3(nn.Module):
 
         outs = []
 
-        A_output = []
-        B_output = []
+        # A_output = []
+        # B_output = []
 
         for i in range(self.num_layers):
             layer = self.layers[i]
@@ -825,9 +825,9 @@ class ISwinTransformerV3(nn.Module):
             x_out, H, W, x, Wh, Ww, x_ = layer(x, conv_out, Wh, Ww)
             x_out = x_out if (i < self.num_layers - 1) else x
 
-            A_output.append(x_conv)
+            # A_output.append(x_conv)
             x__ = x_.view(-1, H, W, self.num_features[i]).permute(0, 3, 1, 2).contiguous()
-            B_output.append(x__)
+            # B_output.append(x__)
 
             if i in self.out_indices:
                 norm_layer = getattr(self, f'norm{i}')
@@ -836,7 +836,7 @@ class ISwinTransformerV3(nn.Module):
                 out = x_out.view(-1, H, W, self.num_features[i]).permute(0, 3, 1, 2).contiguous()
                 outs.append(out)
 
-        return tuple(outs), A_output, B_output
+        return tuple(outs)#, A_output, B_output
 
     def train(self, mode=True):
         """Convert the models into training mode while keep layers freezed."""
@@ -877,7 +877,7 @@ class ISwinTransformerV3(nn.Module):
 
 
 if __name__ == "__main__":
-    data = torch.randn((1, 6, 256, 256))
+    data = torch.randn((2, 6, 256, 256))
     model = ISwinTransformerV3(pretrain_img_size=256,
             patch_size=4,
             in_chans=6,
@@ -899,7 +899,7 @@ if __name__ == "__main__":
             use_checkpoint=False)
     # models = PatchEmbed()
 
-    out = model(data)[1][0].shape
+    out = model(data)[0].shape
     print(out)
 
 

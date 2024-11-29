@@ -793,31 +793,31 @@ if __name__ == '__main__':
     # print('Flops: % .4fG'%(Flops / 1000000000))# 计算量  8.54386 GFlops
     # print('params参数量: % .4fM'% (params / 1000000)) #参数量：等价与上面的summary输出的Total params值
 
-    import numpy as np
-
-    starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
-    repetitions = 300
-    timings = np.zeros((repetitions, 1))
-    # GPU-WARM-UP
-    for _ in range(10):
-        _ = model(tensor_test)
-    # MEASURE PERFORMANCE
-    with torch.no_grad():
-        for rep in range(repetitions):
-            starter.record()
-            _ = model(tensor_test)
-            ender.record()
-            # WAIT FOR GPU SYNC
-            torch.cuda.synchronize()
-            curr_time = starter.elapsed_time(ender)
-            timings[rep] = curr_time
-    mean_syn = np.sum(timings) / repetitions
-    std_syn = np.std(timings)
-    mean_fps = 1000. / mean_syn
-    print(' * Mean@1 {mean_syn:.3f}ms Std@5 {std_syn:.3f}ms FPS@1 {mean_fps:.2f}'.format(mean_syn=mean_syn,
-                                                                                         std_syn=std_syn,
-                                                                                         mean_fps=mean_fps))
-    print(mean_syn)
+    # import numpy as np
+    #
+    # starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
+    # repetitions = 300
+    # timings = np.zeros((repetitions, 1))
+    # # GPU-WARM-UP
+    # for _ in range(10):
+    #     _ = model(tensor_test)
+    # # MEASURE PERFORMANCE
+    # with torch.no_grad():
+    #     for rep in range(repetitions):
+    #         starter.record()
+    #         _ = model(tensor_test)
+    #         ender.record()
+    #         # WAIT FOR GPU SYNC
+    #         torch.cuda.synchronize()
+    #         curr_time = starter.elapsed_time(ender)
+    #         timings[rep] = curr_time
+    # mean_syn = np.sum(timings) / repetitions
+    # std_syn = np.std(timings)
+    # mean_fps = 1000. / mean_syn
+    # print(' * Mean@1 {mean_syn:.3f}ms Std@5 {std_syn:.3f}ms FPS@1 {mean_fps:.2f}'.format(mean_syn=mean_syn,
+    #                                                                                      std_syn=std_syn,
+    #                                                                                      mean_fps=mean_fps))
+    # print(mean_syn)
 
     # starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
     #

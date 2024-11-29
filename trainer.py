@@ -1,5 +1,5 @@
 from sched import scheduler
-
+import torchvision.utils as vutils
 import numpy as np
 import matplotlib.pyplot as plt
 import os
@@ -21,6 +21,8 @@ import loss.losses as losses
 from misc.logger_tool import Logger, Timer
 from models.danet import get_danet
 from torch.optim import lr_scheduler
+
+import torch_pruning as tp
 
 import itertools
 
@@ -65,7 +67,7 @@ def get_scheduler(optimizer, args):
         #     t_in_epochs=False,
         #     warmup_prefix=True,
         # )
-        scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=150, eta_min=1e-6, last_epoch=-1, verbose=False)
+        scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=100, eta_min=1e-6, last_epoch=-1, verbose=False)
     elif args.lr_policy == 'poly':
         scheduler = lr_scheduler.PolynomialLR(optimizer, power=0.9, total_iters=300, last_epoch=-1, verbose=False)
     elif args.lr_policy == 'ReduceLRO':
@@ -209,6 +211,43 @@ class DiceLoss(nn.Module):
 
         return score
 
+class EarlyStopping:
+    def __init__(self, patience=10, verbose=False, delta=0.0, check_interval=100):
+        """
+        :param patience: The number of epochs with no improvement after which training will be stopped.
+        :param verbose: If True, prints a message for each validation improvement.
+        :param delta: Minimum change to be considered an improvement.
+        :param check_interval: The interval (in epochs) after which early stopping should be checked.
+        """
+        self.patience = patience
+        self.verbose = verbose
+        self.delta = delta
+        self.check_interval = check_interval  # 每多少个epoch检查一次
+        self.counter = 0
+        self.best_score = None
+        self.best_epoch = 0
+        self.early_stop = False
+
+    def __call__(self, epoch_score, epoch):
+        # 仅在每check_interval个epoch时进行早停判断
+        if epoch % self.check_interval == 0:
+            if self.best_score is None:
+                self.best_score = epoch_score
+                self.best_epoch = epoch
+            elif epoch_score > self.best_score + self.delta:
+                self.best_score = epoch_score
+                self.best_epoch = epoch
+                self.counter = 0
+            else:
+                self.counter += 1
+                if self.counter >= self.patience:
+                    self.early_stop = True
+                    if self.verbose:
+                        print(f"Early stopping triggered at epoch {epoch}.")
+
+        return self.early_stop
+
+
 class CDTrainer():
 
     def __init__(self, args, dataloaders):  # 初始化参数
@@ -241,9 +280,9 @@ class CDTrainer():
         # self.optimizer_G = optim.SGD(self.net_G.to(self.device).parameters(), lr=self.lr,
         #                              momentum=0.9,
         #                              weight_decay=5e-4)
-        # self.optimizer_G = optim.Adam(self.net_G.to(self.device).parameters(), lr=self.lr, betas=(0.9, 0.999))
-        self.optimizer_G = optim.AdamW(self.net_G.to(self.device).parameters(), eps=1e-8, betas=(0.9, 0.999),
-                    lr=self.lr, weight_decay=0.05)
+        self.optimizer_G = optim.Adam(self.net_G.to(self.device).parameters(), lr=self.lr, betas=(0.9, 0.999))
+        # self.optimizer_G = optim.AdamW(self.net_G.to(self.device).parameters(), eps=1e-8, betas=(0.9, 0.999),
+        #             lr=self.lr, weight_decay=0.05)
         # self.itertools = self.optimizer_G = optim.Adam(itertools.chain(self.net_G.to(self.device).parameters(),
         #                                       [self.log_sigma_d_a, self.log_sigma_f_a],
         #                                       [self.log_sigma_d_b, self.log_sigma_f_b],
@@ -291,6 +330,8 @@ class CDTrainer():
         self.batch_id = 0
         self.epoch_id = 0
         self.checkpoint_dir = args.checkpoint_dir
+
+        self.is_pruning = args.is_pruning
 
         # define the loss functions
         if args.loss == 'ce':
@@ -526,6 +567,8 @@ class CDTrainer():
         # torch.nn.utils.clip_grad_norm_(self.net_G.parameters(), max_norm=5.0)
 
     def train_models(self):
+        # 初始化 EarlyStopping
+        early_stopping = EarlyStopping(patience=50, verbose=True, delta=0.001, check_interval=100)
 
         self._load_checkpoint()
 
@@ -539,7 +582,7 @@ class CDTrainer():
             self.net_G.train()  # Set model to training mode
             # Iterate over data.
             self.logger.write('lr: %0.7f\n' % self.optimizer_G.param_groups[0]['lr'])
-            accumulation_steps = 4
+            accumulation_steps = 2
             for self.batch_id, batch in enumerate(self.dataloaders['train'], 0):
                 self._forward_pass(batch)
                 # update G
@@ -552,6 +595,13 @@ class CDTrainer():
                 if (self.batch_id + 1) % accumulation_steps == 0:
                     self.optimizer_G.step()
                     self.optimizer_G.zero_grad()
+
+            if self.epoch_id % 50 == 0:
+                print(f'Epoch {self.epoch_id}: Gradient values')
+                for name, param in self.net_G.named_parameters():
+                    if param.grad is not None:
+                        print(f'Layer: {name}, Gradient: {param.grad.norm().item()}')
+                        self.logger.write(f'Layer: {name}, Gradient: {param.grad.norm().item()}\n')
 
             self._collect_epoch_states()
             self._update_training_acc_curve()
@@ -576,4 +626,32 @@ class CDTrainer():
             # if self.epoch_id % 5 == 0:      # 每5代保存一次結果,由ljc修改
             self._update_val_acc_curve()
             self._update_checkpoints()
+
+            # 使用早停机制检查是否应该停止训练
+            if early_stopping(self.epoch_Acc, self.epoch_id):
+                print(f"早停触发，训练在第 {self.epoch_id} 轮结束。")
+                break
+                # 保存中间特征图
+                # print(f'Epoch {self.epoch_id}: Saving feature maps to PNG')
+                # # 假设 self.features 是特征图，形状为 [batch_size, channels, height, width]
+                # for i in range(self.features.shape[0]):  # 遍历每个样本
+                #     feature_map = self.features[i]  # 获取第 i 个样本的特征图
+                #     # 将特征图转换为适合保存的格式
+                #     vutils.save_image(feature_map, os.path.join(self.checkpoint_dir,
+                #                                                 f'features_epoch_{self.epoch_id}_sample_{i}.png'),
+                #                       normalize=True)
+
+                # Save feature maps
+                # print(f'Epoch {self.epoch_id}: Saving feature maps to PNG')
+                # for i in range(self.features.shape[0]):  # Iterate over each sample
+                #     feature_map = self.features[i]  # Get the feature map for the i-th sample
+                #     # Ensure the feature map is in the correct format for saving
+                #     feature_map = feature_map.cpu()  # Move to CPU
+                #     feature_map = (feature_map - feature_map.min()) / (
+                #                 feature_map.max() - feature_map.min())  # Normalize
+                #     feature_map = feature_map.unsqueeze(0)  # Add a channel dimension if necessary
+                #     vutils.save_image(feature_map, os.path.join(self.checkpoint_dir,
+                #                                                 f'features_epoch_{self.epoch_id}_sample_{i}.png'),
+                #                       normalize=True)
+
 

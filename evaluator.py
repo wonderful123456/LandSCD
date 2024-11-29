@@ -20,7 +20,7 @@ from utils.saver_images import save_images
 
 class CDEvaluator():
 
-    def __init__(self, args, dataloader,fire_list):
+    def __init__(self, args, dataloader, fire_list):
         self.fire_list = fire_list
         self.args = args
 

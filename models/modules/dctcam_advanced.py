@@ -40,14 +40,14 @@ class MultiSpectralAttentionLayer(torch.nn.Module):
     def __init__(self, channel=512, reduction=16, freq_sel_method='low32'):
         super(MultiSpectralAttentionLayer, self).__init__()
 
-        c2wh = dict([(64, 56), (128, 28), (240, 14), (512, 7)])
-        self.reduction = reduction  # 通道划分的个数
-        self.dct_h = c2wh[channel]  # 输入特征的高度
-        self.dct_w = c2wh[channel]  # 输入特征的宽度
+        c2wh = dict([(96 // 4, 56), (192 // 4, 28), (384 // 4, 14), (768 // 4, 7)])
+        self.reduction = reduction  # Number of channel divisions
+        self.dct_h = c2wh[channel]  # Input feature height
+        self.dct_w = c2wh[channel]  # Input feature width
         self.channel = channel
 
-        self.mapper_x, self.mapper_y = get_freq_indices(freq_sel_method)  # # 获取频率分量的索引
-        self.num_split = len(self.mapper_x)  # 分割数量
+        self.mapper_x, self.mapper_y = get_freq_indices(freq_sel_method)  # Get frequency component indices
+        self.num_split = len(self.mapper_x)  # Number of splits
         self.mapper_x = [temp_x * (self.dct_h // 7) for temp_x in self.mapper_x]
         self.mapper_y = [temp_y * (self.dct_w // 7) for temp_y in self.mapper_y]
 
@@ -70,19 +70,46 @@ class MultiSpectralAttentionLayer(torch.nn.Module):
         self.gamma = nn.Parameter(torch.tensor(2.0, dtype=torch.float32), requires_grad=True)
 
         self.beta = nn.Parameter(torch.zeros(1))
-        # Other initializations as before
-        t = int(abs(math.log2(channel) - self.b[channel // 48]) / self.gamma)
+
+        # Initialize parameters using He initialization
+        self._initialize_weights()
+
+        t = int(abs(math.log2(channel) - self.b[channel // 96 % 4]) / self.gamma)
         k = t if t % 2 else t + 1
 
-        self.conv1d = nn.Sequential(nn.Conv1d(channel, channel, kernel_size=k, padding=int(k / 2)),
-                                    nn.BatchNorm1d(channel),
-                                    nn.Sigmoid(),
-                                    )
+        self.conv1d = nn.Sequential(
+            nn.Conv1d(channel, channel, kernel_size=k, padding=int(k / 2)),
+            nn.BatchNorm1d(channel),
+            nn.ReLU()
+            # nn.Sigmoid(),
+        )
+
+    def _initialize_weights(self):
+        # He initialization for convolutional layers
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                # Kaiming initialization for Conv2d layers
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Conv1d):
+                # Kaiming initialization for Conv1d layers
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.BatchNorm2d):
+                # Initialize BatchNorm2d parameters to ones and zeros
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.BatchNorm1d):
+                # Initialize BatchNorm1d parameters to ones and zeros
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
 
     def build_filter(self, pos, freq, POS):
-        result = math.cos(math.pi * freq * (pos + 0.5) / POS) / math.sqrt(POS)  # 计算频率分量
+        result = math.cos(math.pi * freq * (pos + 0.5) / POS) / math.sqrt(POS)  # Calculate frequency component
         if freq == 0:
-            return result  # 返回结果
+            return result  # Return result
         else:
             return result * math.sqrt(2)
 
@@ -91,38 +118,47 @@ class MultiSpectralAttentionLayer(torch.nn.Module):
         x_pooled = x
 
         xg = self.gate_conv_beta(x).view(n, 32)
-        xg = self.gate_ac(xg) + self.beta#0.1
+        xg = self.gate_ac(xg) + self.beta  # 0.1
 
         param = []
         sum = 0
         for i in range(len(xg[0])):
             sum += xg[0][i]
         param.append(0)
-        for i in range(len(xg[0])-1):
-            a = xg[0][i].item()/sum.item()
-            param.append(round(a*c))
+        for i in range(len(xg[0]) - 1):
+            a = xg[0][i].item() / sum.item()
+            param.append(round(a * c))
 
         sum_n = 0
         for i in range(len(xg[0])):
             sum_n += param[i]
-        param.append(c-sum_n)
+        param.append(c - sum_n)
 
-        dct_filter = torch.zeros(self.channel, self.dct_h, self.dct_w)  # 定义一个全0张量，形状为[channel, tile_size_x, tile_size_y]
+        dct_filter = torch.zeros(self.channel, self.dct_h, self.dct_w)  # Define a zero tensor of shape [channel, tile_size_x, tile_size_y]
 
-        for i, (u_x, v_y) in enumerate(zip(self.mapper_x, self.mapper_y)):  # 遍历频率分量索引
+        for i, (u_x, v_y) in enumerate(zip(self.mapper_x, self.mapper_y)):  # Iterate over frequency component indices
             for t_x in range(self.dct_h):
                 for t_y in range(self.dct_w):
                     dct_filter[param[i]:param[i+1], t_x, t_y] = self.build_filter(t_x, u_x,
-                                                                                           self.dct_h) * self.build_filter(
-                        t_y, v_y, self.dct_w)  # 调用build_filter
+                                                                                   self.dct_h) * self.build_filter(
+                        t_y, v_y, self.dct_w)  # Call build_filter
 
         if h != self.dct_h or w != self.dct_w:
-            x_pooled = torch.nn.functional.adaptive_avg_pool2d(x, (self.dct_h, self.dct_w))  # 自适应平均池化层
+            x_pooled = torch.nn.functional.adaptive_avg_pool2d(x, (self.dct_h, self.dct_w))  # Adaptive average pooling
         x_pooled = x_pooled.to(device)
         dct_filter = dct_filter.to(device)
         y = x_pooled * dct_filter
         y = torch.sum(y, dim=[2, 3])
         y = y.unsqueeze(-1)
 
-        y = self.conv1d(y).view(n, c, 1, 1)  # 对y进行线性投射并改变维度顺序
+        y = self.conv1d(y).view(n, c, 1, 1)  # Linear projection of y and change dimensions
         return x * y.expand_as(x) + x
+
+# if __name__ == '__main__':
+#     img = torch.randn(2, 384 // 4, 32, 32).to('cuda')
+#     model = MultiSpectralAttentionLayer(channel=384 // 4).to('cuda')
+#     out = model(img).to('cuda')
+#     print(out.shape)
+
+# x_test = torch.randn(1, 512, 7, 7, requires_grad=True).to(device)
+# torch.autograd.gradcheck(MultiSpectralAttentionLayer(channel=512), (x_test,))

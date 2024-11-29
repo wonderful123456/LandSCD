@@ -69,7 +69,8 @@ def get_label_path(root_dir, img_name):
 
 class ImageDataset(data.Dataset):
     """VOCdataloder"""
-    def __init__(self, root_dir="C:/Users/zyy/Documents/Tencent Files/919688409/FileRecv/regularCultivatedLandDatasetsV4", split='train', img_size=256, is_train=True,to_tensor=True):
+    # "C:\\Users\\zyy\\Documents\\Tencent Files\\919688409\\FileRecv\\regualrDatasetsFinal"
+    def __init__(self, root_dir="C:\\po_data_1", split='train', img_size=256, is_train=True,to_tensor=True):
         super(ImageDataset, self).__init__()
         self.root_dir = root_dir
         self.img_size = img_size
@@ -78,12 +79,25 @@ class ImageDataset(data.Dataset):
         self.list_path = os.path.join(self.root_dir, LIST_FOLDER_NAME, self.split+'.txt')
         self.img_name_list_tmp = load_img_name_list(self.list_path)
         self.img_name_list = []
+        self.img_name_list_label = []
 
         for line in self.img_name_list_tmp:
-            self.img_name_list.append(line)
-            self.img_name_list.append(line + "_aug_0")
-            self.img_name_list.append(line + "_aug_1")
-            self.img_name_list.append(line + "_aug_2")
+            # self.img_name_list.append(line)
+            # self.img_name_list.append(line + "_aug_0")
+            # self.img_name_list.append(line + "_aug_1")
+            # self.img_name_list.append(line + "_aug_2")
+
+            self.img_name_list.append(line + "_0")
+            self.img_name_list.append(line + "_0_aug_0")
+            self.img_name_list.append(line + "_0_aug_1")
+            self.img_name_list.append(line + "_0_aug_2")
+
+        for line in self.img_name_list_tmp:
+            self.img_name_list_label.append(line)
+            self.img_name_list_label.append(line + "_aug_0")
+            self.img_name_list_label.append(line + "_aug_1")
+            self.img_name_list_label.append(line + "_aug_2")
+
             # self.img_name_list.append(line + "_aug_3")
 
         self.A_size = len(self.img_name_list)  # get the size of dataset A
@@ -121,8 +135,10 @@ class ImageDataset(data.Dataset):
 
 class CDDataset(ImageDataset):
 
-    def __init__(self, root_dir="C:/Users/zyy/Documents/Tencent Files/919688409/FileRecv/regularCultivatedLandDatasetsV4", img_size=256, split='train', is_train=True, label_transform=None,
-                 to_tensor=True):
+    # def __init__(self, root_dir="C:\\Users\\zyy\\Documents\\Tencent Files\\919688409\\FileRecv\\regualrDatasetsFinal", img_size=256, split='train', is_train=True
+    #              to_tensor=True):
+    def __init__(self, root_dir="C:\\po_data_1", img_size=256, split='train', is_train=True, to_tensor=True, label_transform=None,):
+
         super(CDDataset, self).__init__(root_dir, img_size=img_size, split=split, is_train=is_train,
                                         to_tensor=to_tensor)
         self.label_transform = label_transform
@@ -134,17 +150,17 @@ class CDDataset(ImageDataset):
         img_A = np.asarray(Image.open(A_path).convert('RGB'))
         img_B = np.asarray(Image.open(B_path).convert('RGB'))
 
-        L_path = get_label_path(self.root_dir, self.img_name_list[index % self.A_size])
+        L_path = get_label_path(self.root_dir, self.img_name_list_label[index % self.A_size])
         img_L = cv.imread(L_path)
         imgGray = cv.cvtColor(img_L, cv.COLOR_BGR2GRAY)
         label = np.array(imgGray, dtype=np.uint8)
 
-        L_A_path = get_A_label_path(self.root_dir, self.img_name_list[index % self.A_size])
+        L_A_path = get_A_label_path(self.root_dir, self.img_name_list_label[index % self.A_size])
         img_A_L = cv.imread(L_A_path)
         imgGrayA = cv.cvtColor(img_A_L, cv.COLOR_BGR2GRAY)
         label_A = np.array(imgGrayA, dtype=np.uint8)
 
-        L_B_path = get_B_label_path(self.root_dir, self.img_name_list[index % self.A_size])
+        L_B_path = get_B_label_path(self.root_dir, self.img_name_list_label[index % self.A_size])
         img_B_L = cv.imread(L_B_path)
         imgGrayB = cv.cvtColor(img_B_L, cv.COLOR_BGR2GRAY)
         label_B = np.array(imgGrayB, dtype=np.uint8)

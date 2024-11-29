@@ -1,9 +1,3 @@
-#!/usr/bin/env python
-# coding=utf-8
-#@Time : 2022/10/11 15:26
-#@Author: sunrise
-#@File : swin_transformer.py
-#@Todo : do
 # --------------------------------------------------------
 # Swin Transformer
 # Copyright (c) 2021 Microsoft
@@ -17,10 +11,20 @@ import torch.nn.functional as F
 import torch.utils.checkpoint as checkpoint
 import numpy as np
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
-from torch.utils import model_zoo
 
-from models.utils.checkpoint import load_checkpoint
-from models.utils.logger import get_root_logger
+from mmcv.runner import load_checkpoint
+import sys
+
+sys.path.append('SenseEarth2020-ChangeDetection/models/backbone')
+from .builder import BACKBONES
+import logging
+
+from mmcv.utils import get_logger
+
+
+def get_root_logger(log_file=None, log_level=logging.INFO):
+    logger = get_logger(name='mmseg', log_file=log_file, log_level=log_level)
+    return logger
 
 
 class Mlp(nn.Module):
@@ -93,19 +97,17 @@ class WindowAttention(nn.Module):
     def __init__(self, dim, window_size, num_heads, qkv_bias=True, qk_scale=None, attn_drop=0., proj_drop=0.):
 
         super().__init__()
-        self.dim = dim #输入序列的通道数
-        self.window_size = window_size  # Wh, Ww （w, h）
-        self.num_heads = num_heads #多头的数量
-        head_dim = dim // num_heads #每个投的通道数维度
+        self.dim = dim
+        self.window_size = window_size  # Wh, Ww
+        self.num_heads = num_heads
+        head_dim = dim // num_heads
         self.scale = qk_scale or head_dim ** -0.5
 
         # define a parameter table of relative position bias
-        #定义相对位置偏差参数表
         self.relative_position_bias_table = nn.Parameter(
             torch.zeros((2 * window_size[0] - 1) * (2 * window_size[1] - 1), num_heads))  # 2*Wh-1 * 2*Ww-1, nH
 
         # get pair-wise relative position index for each token inside the window
-        # 获取窗口内每个标记的成对相对位置索引
         coords_h = torch.arange(self.window_size[0])
         coords_w = torch.arange(self.window_size[1])
         coords = torch.stack(torch.meshgrid([coords_h, coords_w]))  # 2, Wh, Ww
@@ -138,8 +140,7 @@ class WindowAttention(nn.Module):
         q, k, v = qkv[0], qkv[1], qkv[2]  # make torchscript happy (cannot use tensor as tuple)
 
         q = q * self.scale
-        # k = k.transpose(-2,-1)
-        attn = (q @ k.transpose(-2, -1)) #b, h, n, c   b h c n -> b h n n
+        attn = (q @ k.transpose(-2, -1))
 
         relative_position_bias = self.relative_position_bias_table[self.relative_position_index.view(-1)].view(
             self.window_size[0] * self.window_size[1], self.window_size[0] * self.window_size[1], -1)  # Wh*Ww,Wh*Ww,nH
@@ -156,7 +157,7 @@ class WindowAttention(nn.Module):
 
         attn = self.attn_drop(attn)
 
-        x = (attn @ v).transpose(1, 2).reshape(B_, N, C) #  b h n n * b h n c-  b h n c   b n h c
+        x = (attn @ v).transpose(1, 2).reshape(B_, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
         return x
@@ -229,7 +230,7 @@ class SwinTransformerBlock(nn.Module):
 
         # cyclic shift
         if self.shift_size > 0:
-            shifted_x = torch.roll(x, shifts=(-self.shift_size, -self.shift_size), dims=(1, 2)) #进行偏移
+            shifted_x = torch.roll(x, shifts=(-self.shift_size, -self.shift_size), dims=(1, 2))
             attn_mask = mask_matrix
         else:
             shifted_x = x
@@ -271,6 +272,7 @@ class PatchMerging(nn.Module):
         dim (int): Number of input channels.
         norm_layer (nn.Module, optional): Normalization layer.  Default: nn.LayerNorm
     """
+
     def __init__(self, dim, norm_layer=nn.LayerNorm):
         super().__init__()
         self.dim = dim
@@ -294,7 +296,7 @@ class PatchMerging(nn.Module):
         if pad_input:
             x = F.pad(x, (0, 0, 0, W % 2, 0, H % 2))
 
-        x0 = x[:, 0::2, 0::2, :]  # B H/2 W/2 ,d/2, C
+        x0 = x[:, 0::2, 0::2, :]  # B H/2 W/2 C
         x1 = x[:, 1::2, 0::2, :]  # B H/2 W/2 C
         x2 = x[:, 0::2, 1::2, :]  # B H/2 W/2 C
         x3 = x[:, 1::2, 1::2, :]  # B H/2 W/2 C
@@ -453,21 +455,23 @@ class PatchEmbed(nn.Module):
 
         return x
 
+
+@BACKBONES.register_module()
 class SwinTransformer(nn.Module):
     """ Swin Transformer backbone.
         A PyTorch impl of : `Swin Transformer: Hierarchical Vision Transformer using Shifted Windows`  -
           https://arxiv.org/pdf/2103.14030
 
     Args:
-        pretrain_img_size (int): Input image size for training the pretrained models,
+        pretrain_img_size (int): Input image size for training the pretrained model,
             used in absolute postion embedding. Default 224.
         patch_size (int | tuple(int)): Patch size. Default: 4.
         in_chans (int): Number of input image channels. Default: 3.
         embed_dim (int): Number of linear projection output channels. Default: 96.
         depths (tuple[int]): Depths of each Swin Transformer stage.
         num_heads (tuple[int]): Number of attention head of each stage.
-        window_size (int): Window size. Default: 7.
-        mlp_ratio (float): Ratio of mlp hidden dim to embedding dim. Default: 4.
+        window_size (int): Window size. Default: 7.      MSA W-MSA
+        mlp_ratio (float): Ratio of mlp hidden dim to embedding dim. Default: 4. 第一个全连接层channels数翻多少倍
         qkv_bias (bool): If True, add a learnable bias to query, key, value. Default: True
         qk_scale (float): Override default qk scale of head_dim ** -0.5 if set.
         drop_rate (float): Dropout rate.
@@ -501,9 +505,7 @@ class SwinTransformer(nn.Module):
                  patch_norm=True,
                  out_indices=(0, 1, 2, 3),
                  frozen_stages=-1,
-                 use_checkpoint=False,
-                 pretrained=True,
-                 layer_name="tiny"):
+                 use_checkpoint=False):
         super().__init__()
 
         self.pretrain_img_size = pretrain_img_size
@@ -514,7 +516,7 @@ class SwinTransformer(nn.Module):
         self.out_indices = out_indices
         self.frozen_stages = frozen_stages
 
-        # split image into non-overlapping patches
+        # split image into non-overlapping patches 对应开始的 patch partition 和 linear embedding
         self.patch_embed = PatchEmbed(
             patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim,
             norm_layer=norm_layer if self.patch_norm else None)
@@ -525,7 +527,8 @@ class SwinTransformer(nn.Module):
             patch_size = to_2tuple(patch_size)
             patches_resolution = [pretrain_img_size[0] // patch_size[0], pretrain_img_size[1] // patch_size[1]]
 
-            self.absolute_pos_embed = nn.Parameter(torch.zeros(1, embed_dim, patches_resolution[0], patches_resolution[1]))
+            self.absolute_pos_embed = nn.Parameter(
+                torch.zeros(1, embed_dim, patches_resolution[0], patches_resolution[1]))
             trunc_normal_(self.absolute_pos_embed, std=.02)
 
         self.pos_drop = nn.Dropout(p=drop_rate)
@@ -562,13 +565,13 @@ class SwinTransformer(nn.Module):
             self.add_module(layer_name, layer)
 
         self._freeze_stages()
-        if pretrained:
-            if layer_name == "tiny":
-                self._load_pretrained_model()
-            elif layer_name == "small":
-                self._load_pretrained_model1()
-            elif layer_name == "large":
-                self._load_pretrained_model2()
+
+        self.trans_conv = FuseLayers()
+        # self.trans_conv = nn.Sequential(
+        #     nn.Conv2d(1024, 600, kernel_size=1),
+        #     nn.BatchNorm2d(600),
+        #     nn.ReLU(True)
+        # )
 
     def _freeze_stages(self):
         if self.frozen_stages >= 0:
@@ -587,31 +590,221 @@ class SwinTransformer(nn.Module):
                 for param in m.parameters():
                     param.requires_grad = False
 
-    def init_weights(self, pretrained=None):
+    def init_weights(self, pretrained=''):
         """Initialize the weights in backbone.
 
         Args:
             pretrained (str, optional): Path to pre-trained weights.
                 Defaults to None.
         """
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.normal_(m.weight, std=0.001)
+        import os
+        if os.path.isfile(pretrained):
+            pretrained_dict = torch.load(pretrained)['model']
+            model_dict = self.state_dict()
 
-        def _init_weights(m):
-            if isinstance(m, nn.Linear):
-                trunc_normal_(m.weight, std=.02)
-                if isinstance(m, nn.Linear) and m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
-            elif isinstance(m, nn.LayerNorm):
-                nn.init.constant_(m.bias, 0)
-                nn.init.constant_(m.weight, 1.0)
+            pretrained_dict = {k: v for k, v in pretrained_dict.items()
+                               if k in model_dict.keys()}
 
-        if isinstance(pretrained, str):
-            self.apply(_init_weights)
-            logger = get_root_logger()
-            load_checkpoint(self, pretrained, strict=False, logger=logger)
-        elif pretrained is None:
-            self.apply(_init_weights)
+            model_dict.update(pretrained_dict)
+            self.load_state_dict(model_dict)
+
+    def forward(self, x):
+        """Forward function."""
+        x = self.patch_embed(x)
+
+        Wh, Ww = x.size(2), x.size(3)
+        # print(Wh, Ww)
+        if self.ape:
+            # interpolate the position embedding to the corresponding size
+            absolute_pos_embed = F.interpolate(self.absolute_pos_embed, size=(Wh, Ww), mode='bicubic')
+            x = (x + absolute_pos_embed).flatten(2).transpose(1, 2)  # B Wh*Ww C
         else:
-            raise TypeError('pretrained must be a str or None')
+            x = x.flatten(2).transpose(1, 2)
+        x = self.pos_drop(x)
+
+        outs = []
+        for i in range(self.num_layers):
+            layer = self.layers[i]
+            x_out, H, W, x, Wh, Ww = layer(x, Wh, Ww)
+
+            if i in self.out_indices:
+                norm_layer = getattr(self, f'norm{i}')
+                x_out = norm_layer(x_out)
+
+                out = x_out.view(-1, H, W, self.num_features[i]).permute(0, 3, 1, 2).contiguous()
+                # print(out.shape)
+                outs.append(out)
+
+        out = self.trans_conv(outs)
+
+        return out
+
+    def base_forward(self, x):
+        return [self.forward(x)]
+
+    def train(self, mode=True):
+        """Convert the model into training mode while keep layers freezed."""
+        super(SwinTransformer, self).train(mode)
+        self._freeze_stages()
+
+
+# multi-scale feature aggregation module
+class FuseLayers(nn.Module):
+    def __init__(self, is_shuffle=False):
+        super().__init__()
+        self.is_shuffle = is_shuffle
+        self.channel_nums = [96, 192, 384, 768]
+        # self.channel_nums = [96, 192, 384, 768]
+        self.conv1 = self.Conv1(self.channel_nums[3] + self.channel_nums[2], self.channel_nums[3])
+        self.conv2 = self.Conv1(self.channel_nums[3] + self.channel_nums[1], self.channel_nums[3])
+        self.conv3 = self.Conv1(self.channel_nums[3] + self.channel_nums[0], 480)
+
+    def forward(self, layers):
+        layer0, layer1, layer2, layer3 = layers[0], layers[1], layers[2], layers[3]
+        layer3 = F.interpolate(layer3, scale_factor=2, mode='bilinear', align_corners=True)
+
+        layer2 = self.conv1(torch.cat((layer3, layer2), dim=1))
+        layer2 = F.interpolate(layer2, scale_factor=2, mode='bilinear', align_corners=True)
+        layer1 = self.conv2(torch.cat((layer2, layer1), dim=1))
+        layer1 = F.interpolate(layer1, scale_factor=2, mode='bilinear', align_corners=True)
+        out = self.conv3(torch.cat((layer1, layer0), dim=1))
+        if self.is_shuffle:
+            out = self.channel_shuffle(out)
+        return out
+
+    def Conv1(self, in_channels, out_channels):
+        conv = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(True)
+        )
+        return conv
+
+    def channel_shuffle(self, x):
+        groups = 2
+        batchsize, num_channels, height, width = x.data.size()
+        # assert (num_channels % 4 == 0)
+        channels_per_group = num_channels // groups
+        x = x.view(batchsize, groups, channels_per_group, height, width)
+        x = torch.transpose(x, 1, 2).contiguous()
+        x = x.view(batchsize, -1, height, width)
+        return x
+
+
+@BACKBONES.register_module()
+class SwinTransformer_HR(nn.Module):
+    def __init__(self,
+                 pretrain_img_size=512,
+                 patch_size=4,
+                 in_chans=3,
+                 embed_dim=96,
+                 depths=[2, 2, 6, 2],
+                 num_heads=[3, 6, 12, 24],
+                 window_size=7,
+                 mlp_ratio=4.,
+                 qkv_bias=True,
+                 qk_scale=None,
+                 drop_rate=0.,
+                 attn_drop_rate=0.,
+                 drop_path_rate=0.2,
+                 norm_layer=nn.LayerNorm,
+                 ape=False,
+                 patch_norm=True,
+                 out_indices=(0, 1, 2, 3),
+                 frozen_stages=-1,
+                 use_checkpoint=False):
+        super().__init__()
+
+        self.pretrain_img_size = pretrain_img_size
+        self.num_layers = len(depths)
+        self.embed_dim = embed_dim
+        self.ape = ape
+        self.patch_norm = patch_norm
+        self.out_indices = out_indices
+        self.frozen_stages = frozen_stages
+
+        # split image into non-overlapping patches 对应开始的 patch partition 和 linear embedding
+        self.patch_embed = PatchEmbed(
+            patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim,
+            norm_layer=norm_layer if self.patch_norm else None)
+
+        # absolute position embedding
+        if self.ape:
+            pretrain_img_size = to_2tuple(pretrain_img_size)
+            patch_size = to_2tuple(patch_size)
+            patches_resolution = [pretrain_img_size[0] // patch_size[0], pretrain_img_size[1] // patch_size[1]]
+
+            self.absolute_pos_embed = nn.Parameter(
+                torch.zeros(1, embed_dim, patches_resolution[0], patches_resolution[1]))
+            trunc_normal_(self.absolute_pos_embed, std=.02)
+
+        self.pos_drop = nn.Dropout(p=drop_rate)
+
+        # stochastic depth
+        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, sum(depths))]  # stochastic depth decay rule
+
+        # build layers
+        self.layers = nn.ModuleList()
+        for i_layer in range(self.num_layers):
+            layer = BasicLayer(
+                dim=int(embed_dim * 2 ** i_layer),
+                depth=depths[i_layer],
+                num_heads=num_heads[i_layer],
+                window_size=window_size,
+                mlp_ratio=mlp_ratio,
+                qkv_bias=qkv_bias,
+                qk_scale=qk_scale,
+                drop=drop_rate,
+                attn_drop=attn_drop_rate,
+                drop_path=dpr[sum(depths[:i_layer]):sum(depths[:i_layer + 1])],
+                norm_layer=norm_layer,
+                downsample=PatchMerging if (i_layer < self.num_layers - 1) else None,
+                use_checkpoint=use_checkpoint)
+            self.layers.append(layer)
+
+        num_features = [int(embed_dim * 2 ** i) for i in range(self.num_layers)]
+        self.num_features = num_features
+
+        # add a norm layer for each output
+        for i_layer in out_indices:
+            layer = norm_layer(num_features[i_layer])
+            layer_name = f'norm{i_layer}'
+            self.add_module(layer_name, layer)
+
+        self._freeze_stages()
+
+    def _freeze_stages(self):
+        if self.frozen_stages >= 0:
+            self.patch_embed.eval()
+            for param in self.patch_embed.parameters():
+                param.requires_grad = False
+
+        if self.frozen_stages >= 1 and self.ape:
+            self.absolute_pos_embed.requires_grad = False
+
+        if self.frozen_stages >= 2:
+            self.pos_drop.eval()
+            for i in range(0, self.frozen_stages - 1):
+                m = self.layers[i]
+                m.eval()
+                for param in m.parameters():
+                    param.requires_grad = False
+
+    def init_weights(self, pretrained=''):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.normal_(m.weight, std=0.001)
+        import os
+        if os.path.isfile(pretrained):
+            pretrained_dict = torch.load(pretrained)['model']
+            model_dict = self.state_dict()
+            pretrained_dict = {k: v for k, v in pretrained_dict.items()
+                               if k in model_dict.keys()}
+            model_dict.update(pretrained_dict)
+            self.load_state_dict(model_dict)
 
     def forward(self, x):
         """Forward function."""
@@ -637,70 +830,11 @@ class SwinTransformer(nn.Module):
 
                 out = x_out.view(-1, H, W, self.num_features[i]).permute(0, 3, 1, 2).contiguous()
                 outs.append(out)
+        ''' 将4个stage的输出融合 '''
 
-        return tuple(outs)
+        return outs[-1]
 
-    def train(self, mode=True):
-        """Convert the models into training mode while keep layers freezed."""
-        super(SwinTransformer, self).train(mode)
-        self._freeze_stages()
-
-    def _load_pretrained_model(self):
-        pretrain_dict = model_zoo.load_url('https://github.com/SwinTransformer/storage/releases/download/v1.0.0/swin_tiny_patch4_window7_224.pth')
-        model_dict = {}
-        state_dict = self.state_dict()
-        for k, v in pretrain_dict['models'].items():
-            if k in state_dict:
-                model_dict[k] = v
-        state_dict.update(model_dict)
-        self.load_state_dict(state_dict)
-
-    def _load_pretrained_model1(self):
-        pretrain_dict = model_zoo.load_url(
-            'https://github.com/SwinTransformer/storage/releases/download/v1.0.0/swin_small_patch4_window7_224.pth')
-        model_dict = {}
-        state_dict = self.state_dict()
-        for k, v in pretrain_dict['models'].items():
-            if k in state_dict:
-                model_dict[k] = v
-        state_dict.update(model_dict)
-        self.load_state_dict(state_dict)
-
-    def _load_pretrained_model2(self):
-        pretrain_dict = model_zoo.load_url(
-            'https://github.com/SwinTransformer/storage/releases/download/v1.0.0/swin_large_patch4_window7_224_22kto1k.pth')
-        model_dict = {}
-        state_dict = self.state_dict()
-        for k, v in pretrain_dict['models'].items():
-            if k in state_dict:
-                model_dict[k] = v
-        state_dict.update(model_dict)
-        self.load_state_dict(state_dict)
-
-
-if __name__ == "__main__":
-    data = torch.randn((1, 3, 224, 224))
-    model = SwinTransformer(pretrain_img_size=224,
-            patch_size=4,
-            in_chans=3,
-            embed_dim=96,
-            depths=[2, 2, 6, 2],
-            num_heads=[3, 6, 12, 24],
-            window_size=7,
-            mlp_ratio=4.,
-            qkv_bias=True,
-            qk_scale=None,
-            drop_rate=0.,
-            attn_drop_rate=0.,
-            drop_path_rate=0.2,
-            norm_layer=nn.LayerNorm,
-            ape=False,
-            patch_norm=True,
-            out_indices=(0, 1, 2, 3),
-            frozen_stages=-1,
-            use_checkpoint=False)
-    # models = PatchEmbed()
-    out = model(data)
-    print(out)
+    def base_forward(self, x):
+        return [self.forward(x)]
 
 

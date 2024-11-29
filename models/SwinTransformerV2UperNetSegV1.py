@@ -137,7 +137,7 @@ class SwinTransformerUperNetBase(nn.Module):
     def forward(self, x1, x2):
         H, W = x1.shape[2], x1.shape[3]
         x1, x1_list = self.backbone.forward_intermediates(x1)
-        x2, x2_list = self.backbone2.forward_intermediates(x2)
+        x2, x2_list = self.backbone.forward_intermediates(x2)
 
         x1_seg = self.a_seg_decode_head(x1_list)
         x2_seg = self.b_seg_decode_head(x2_list)
@@ -153,15 +153,15 @@ class SwinTransformerUperNetBase(nn.Module):
 
 if __name__ == '__main__':
     device = torch.device("cuda")
-    img = torch.randn(2, 3, 256, 256).to('cuda')
-    img_B = torch.randn(2, 3, 256, 256).to('cuda')
+    img = torch.randn(16, 3, 256, 256).to('cuda')
+    img_B = torch.randn(16, 3, 256, 256).to('cuda')
     models = SwinTransformerUperNetBase().to('cuda')
     print(models(img, img_B)[2].shape)
 
     from thop import profile
 
-    # input = torch.randn(16, 3, 256, 256).to(device)
-    # input_B = torch.randn(16, 3, 256, 256).to(device)
-    # flops, params = profile(models, inputs=(input,input_B))
-    # print('the flops is {}G,the params is {}M'.format(round(flops / (10 ** 9), 2),
-    #                                                   round(params / (10 ** 6), 2)))  # 4111514624.0 25557032.0 res50
+    input = torch.randn(16, 3, 256, 256).to(device)
+    input_B = torch.randn(16, 3, 256, 256).to(device)
+    flops, params = profile(models, inputs=(input,input_B))
+    print('the flops is {}G,the params is {}M'.format(round(flops / (10 ** 9), 2),
+                                                      round(params / (10 ** 6), 2)))  # 4111514624.0 25557032.0 res50
